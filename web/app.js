@@ -479,29 +479,60 @@ function recoverResumeEpisode(key) {
   }).catch(() => { /* Keep any available local resume option. */ });
 }
 
+const continueLimit = 6;
+
 function paintContinueListening() {
   const panel = $('#continue-listening');
   if (!panel) return;
   const candidates = recentProgress(state.progress, sync.data.progressAt, state.current?.key, state.nativeProgressAt);
-  if (candidates.length && !findResumeEpisode(candidates[0].key) && navigator.onLine) {
-    recoverResumeEpisode(candidates[0].key);
+  if (navigator.onLine) {
+    for (const candidate of candidates.slice(0, continueLimit)) {
+      if (!findResumeEpisode(candidate.key)) recoverResumeEpisode(candidate.key);
+    }
   }
-  const latest = candidates.find(item => findResumeEpisode(item.key));
-  panel.hidden = !latest;
-  if (!latest) return;
-  const episode = findResumeEpisode(latest.key);
-  if (panel.dataset.episode !== episode.key) {
-    panel.dataset.episode = episode.key;
-    const card = el('div', 'continue-card');
-    const copy = el('div', 'continue-copy');
-    copy.append(el('strong', '', episode.title), el('small', 'continue-meta'));
-    const play = button('Resume', () => start(episode), 'primary continue-action');
-    card.append(artwork(episode, 'mini-cover', true), copy, play);
-    panel.replaceChildren(el('h2', '', 'Continue Listening'), card);
+  const items = [];
+  for (const candidate of candidates) {
+    const episode = findResumeEpisode(candidate.key);
+    if (!episode) continue;
+    items.push({ episode, position: candidate.position });
+    if (items.length >= continueLimit) break;
   }
-  const pause = activeKey === episode.key && playing;
-  panel.querySelector('.continue-action').textContent = pause ? 'Pause' : 'Resume';
-  panel.querySelector('.continue-meta').textContent = episode.show + ' · ' + time(latest.position);
+  panel.hidden = !items.length;
+  if (!items.length) {
+    delete panel.dataset.episodes;
+    return;
+  }
+  const signature = items.map(item => item.episode.key).join('\n');
+  if (panel.dataset.episodes !== signature) {
+    for (const cover of panel.querySelectorAll('[data-artwork-feed]')) coverObserver.unobserve(cover);
+    panel.dataset.episodes = signature;
+    const heading = el('div', 'section-head');
+    heading.append(el('h2', '', 'Continue Listening'));
+    const list = el('div', 'grid');
+    for (const { episode } of items) {
+      const wrapper = el('article', 'podcast-card');
+      const card = button('', () => openFeed(episode.feed, { title: episode.show, artwork: episode.artwork }), 'card');
+      card.append(artwork(episode, 'cover', true), el('strong', '', episode.title), el('small', '', episode.show));
+      const actions = el('div', 'card-actions');
+      const meta = el('small', 'continue-meta');
+      meta.dataset.episode = episode.key;
+      const play = button('Resume', () => start(episode), 'primary continue-action');
+      play.dataset.episode = episode.key;
+      play.setAttribute('aria-label', 'Resume ' + episode.title);
+      actions.append(meta, play);
+      wrapper.append(card, actions);
+      list.append(wrapper);
+    }
+    panel.replaceChildren(heading, list);
+  }
+  const positions = new Map(items.map(item => [item.episode.key, item.position]));
+  for (const meta of panel.querySelectorAll('.continue-meta')) {
+    meta.textContent = time(positions.get(meta.dataset.episode) ?? 0);
+  }
+  for (const play of panel.querySelectorAll('.continue-action')) {
+    const pause = activeKey === play.dataset.episode && playing;
+    play.textContent = pause ? 'Pause' : 'Resume';
+  }
 }
 
 function releaseInfo(timing) {
@@ -1066,10 +1097,8 @@ function player() {
     if (episodeCard) paintEpisodeButton(episodeCard.control, '❚❚', 'Pause', episodeCard.title);
     playingCard = episodeCard;
   }
-  const quickResume = $('.continue-action');
-  if (quickResume) {
-    const cardKey = $('#continue-listening').dataset.episode;
-    quickResume.textContent = playing && cardKey === activeKey ? 'Pause' : 'Resume';
+  for (const quickResume of document.querySelectorAll('#continue-listening .continue-action')) {
+    quickResume.textContent = playing && quickResume.dataset.episode === activeKey ? 'Pause' : 'Resume';
   }
 }
 
