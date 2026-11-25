@@ -1,4 +1,4 @@
-import { catalog, categories, directoryShows, chartIds, rankedShows, httpsUrl, parseFeed, readArtwork, enqueue, time } from './model.js';
+import { catalog, categories, directoryShows, chartIds, rankedShows, httpsUrl, parseFeed, readArtwork, readEpisodeIds, episodeActivity, enqueue, time } from './model.js';
 
 const $ = selector => document.querySelector(selector);
 const native = window.OnionNative;
@@ -8,6 +8,7 @@ let saved;
 try { saved = JSON.parse(localStorage.getItem(key)) ?? {}; } catch { saved = {}; }
 const state = {
   follows: saved.follows ?? [], queue: saved.queue ?? [], progress: saved.progress ?? {},
+  episodeActivity: saved.episodeActivity ?? {},
   downloads: saved.downloads ?? [], current: saved.current ?? null, rate: saved.rate ?? 1,
   page: 'discover', show: null, query: '', results: null, message: '', loading: false
 };
@@ -22,6 +23,9 @@ let noticeTimer;
 let nativeId = 0;
 let endedKey = '';
 const waiting = new Map();
+const feedCheckAfter = new Map();
+const feedCheckInterval = 5 * 60_000;
+let checkingFollows = false;
 const chartCache = new Map();
 const searchCache = new Map();
 const initialRoute = { page: 'discover', depth: 0 };
@@ -68,8 +72,8 @@ function android(action, data = {}) {
 }
 
 function save() {
-  const { follows, queue, progress, current, rate, downloads } = state;
-  try { localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, downloads })); }
+  const { follows, queue, progress, current, rate, downloads, episodeActivity } = state;
+  try { localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, downloads, episodeActivity })); }
   catch { notice('OnionPod could not save changes on this device.'); }
 }
 
@@ -169,12 +173,29 @@ function artwork(item, cls = 'cover', lookup = false) {
   return panel;
 }
 
+function updateEpisodeBadges() {
+  for (const badge of document.querySelectorAll('[data-episode-badge]')) {
+    const count = state.episodeActivity[badge.dataset.episodeBadge]?.unread ?? 0;
+    badge.hidden = count === 0;
+    badge.firstChild.textContent = String(count);
+    badge.lastChild.textContent = count === 1 ? ' new episode' : ' new episodes';
+  }
+}
+
 function grid(items) {
   const panel = el('div', 'grid');
+  const followed = new Set(state.follows.map(show => show.url));
   for (const item of items) {
     const card = button('', () => openFeed(item.url, item), 'card');
     card.append(artwork(item, 'cover', true), el('strong', '', item.title), el('small', '', item.author || 'Podcast'));
     if (item.category) card.append(el('small', 'category', item.category));
+    if (followed.has(item.url)) {
+      const badge = el('span', 'episode-badge');
+      badge.dataset.episodeBadge = item.url;
+      badge.hidden = true;
+      badge.append(el('span'), el('span', 'sr-only'));
+      card.append(badge);
+    }
     panel.append(card);
   }
   return panel;
@@ -207,6 +228,7 @@ function showRoute(route) {
     if (route.page === 'discover') { state.query = ''; state.results = null; }
     render();
   }
+  if (route.page === 'library') refreshFollowedFeeds();
   window.scrollTo(0, 0);
 }
 
@@ -345,10 +367,14 @@ function render() {
     const following = state.follows.some(item => item.url === show.url);
     copy.append(el('h1', '', show.title), el('p', 'meta', show.author || 'Podcast'));
     copy.append(button(following ? 'Unfollow' : 'Follow podcast', () => {
-      if (following) state.follows = state.follows.filter(item => item.url !== show.url);
-      else {
+      if (following) {
+        state.follows = state.follows.filter(item => item.url !== show.url);
+        delete state.episodeActivity[show.url];
+        feedCheckAfter.delete(show.url);
+      } else {
         const { episodes, ...details } = show;
         state.follows.push(details);
+        markShowOpened(show);
       }
       save(); render();
     }, following ? 'outline' : 'primary'));
@@ -373,6 +399,7 @@ function render() {
     if (page === 'library') content.append(state.follows.length ? grid(state.follows) : el('p', 'empty', 'Follow a podcast to find it here.'));
     else insertList(content, page === 'queue' ? state.queue : state.downloads, page);
   }
+  updateEpisodeBadges();
 }
 
 async function request(endpoint, url) {
@@ -385,6 +412,42 @@ async function request(endpoint, url) {
 
 function requestSource(url) {
   return request('/api/feed?url=' + encodeURIComponent(url), url);
+}
+
+function markShowOpened(show) {
+  const previous = state.episodeActivity[show.url];
+  const next = episodeActivity(previous, show.episodes.map(episode => episode.id), true);
+  state.episodeActivity[show.url] = next;
+  feedCheckAfter.set(show.url, Date.now() + feedCheckInterval);
+  return next !== previous;
+}
+
+async function refreshFollowedFeeds() {
+  if (checkingFollows || document.hidden || !navigator.onLine) return;
+  const due = state.follows.filter(show => (feedCheckAfter.get(show.url) ?? 0) <= Date.now());
+  if (!due.length) return;
+  checkingFollows = true;
+  async function refresh() {
+    while (due.length && !document.hidden) {
+      const follow = due.shift();
+      const { url } = follow;
+      if (!state.follows.includes(follow) || feedCheckAfter.get(url) > Date.now()) continue;
+      const previous = state.episodeActivity[url];
+      feedCheckAfter.set(url, Date.now() + feedCheckInterval);
+      try {
+        const data = await requestSource(url);
+        if (!state.follows.includes(follow) || state.episodeActivity[url] !== previous) continue;
+        const next = episodeActivity(previous, readEpisodeIds(data.body, data.url));
+        if (next !== previous) {
+          state.episodeActivity[url] = next;
+          save();
+          updateEpisodeBadges();
+        }
+      } catch { /* Keep the last count if the feed cannot be checked. */ }
+    }
+  }
+  try { await Promise.all(Array.from({ length: Math.min(3, due.length) }, refresh)); }
+  finally { checkingFollows = false; }
 }
 
 async function loadCategory(category, version) {
@@ -447,7 +510,10 @@ async function loadFeed(url, hint, version) {
     const data = await requestSource(url);
     const show = parseFeed(data.body, data.url, url);
     if (show.artwork) coverUrls.set(url, show.artwork);
-    if (version === generation) state.show = { ...hint, ...show, artwork: show.artwork || hint.artwork, author: show.author || hint.author };
+    if (version === generation) {
+      state.show = { ...hint, ...show, artwork: show.artwork || hint.artwork, author: show.author || hint.author };
+      if (state.follows.some(item => item.url === url) && markShowOpened(show)) save();
+    }
   } catch (error) {
     if (version === generation) state.message = 'Could not open this feed. ' + error.message;
   } finally { if (version === generation) render(); }
@@ -654,3 +720,7 @@ window.addEventListener('popstate', event => showRoute(event.state?.onionPod ?? 
 if (!history.state?.onionPod) history.replaceState({ onionPod: initialRoute }, '');
 showRoute(history.state.onionPod);
 player();
+refreshFollowedFeeds();
+setInterval(refreshFollowedFeeds, feedCheckInterval);
+document.addEventListener('visibilitychange', refreshFollowedFeeds);
+window.addEventListener('online', refreshFollowedFeeds);

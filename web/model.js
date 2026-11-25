@@ -108,12 +108,8 @@ function showDescription(channel) {
   return '';
 }
 
-export function parseFeed(xml, base, original, DOM = globalThis.DOMParser) {
-  const channel = readChannel(xml, DOM);
-  const title = text(channel, 'title') || 'Untitled podcast';
-  const artwork = channelArtwork(channel, base);
+function* playableEntries(channel, base) {
   const seen = new Set();
-  const episodes = [];
   for (const item of channel.children) {
     if (!['entry', 'item'].includes(item.localName)) continue;
     const enclosure = Array.from(item.children).find(child => {
@@ -123,14 +119,38 @@ export function parseFeed(xml, base, original, DOM = globalThis.DOMParser) {
     });
     const audio = httpsUrl(enclosure?.getAttribute('url') || enclosure?.getAttribute('href'), base);
     if (!audio) continue;
-    const key = JSON.stringify([original, text(item, 'guid') || text(item, 'id') || audio]);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    episodes.push({
-      key, audio, title: text(item, 'title') || 'Untitled episode', feed: original, show: title, artwork,
-      date: text(item, 'pubDate') || text(item, 'published') || text(item, 'updated')
-    });
+    const id = text(item, 'guid') || text(item, 'id') || audio;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    yield { id, item, audio };
   }
+}
+
+export function readEpisodeIds(xml, base, DOM = globalThis.DOMParser) {
+  return Array.from(playableEntries(readChannel(xml, DOM), base), ({ id }) => id);
+}
+
+export function episodeActivity(previous, ids, opened = false) {
+  const known = new Set(previous?.known);
+  let unread = opened ? 0 : previous?.unread ?? 0;
+  for (const id of ids) {
+    if (known.has(id)) continue;
+    known.add(id);
+    if (previous && !opened) unread++;
+  }
+  if (previous && known.size === previous.known.length && unread === previous.unread) return previous;
+  return { known: [...known], unread };
+}
+
+export function parseFeed(xml, base, original, DOM = globalThis.DOMParser) {
+  const channel = readChannel(xml, DOM);
+  const title = text(channel, 'title') || 'Untitled podcast';
+  const artwork = channelArtwork(channel, base);
+  const episodes = Array.from(playableEntries(channel, base), ({ id, item, audio }) => ({
+    key: JSON.stringify([original, id]), id, audio, title: text(item, 'title') || 'Untitled episode',
+    feed: original, show: title, artwork,
+    date: text(item, 'pubDate') || text(item, 'published') || text(item, 'updated')
+  }));
   return {
     url: original, title, artwork, description: showDescription(channel),
     author: text(channel, 'author') || text(channel, 'creator'), episodes

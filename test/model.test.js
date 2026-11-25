@@ -1,7 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chartIds, enqueue, httpsUrl, rankedShows, time } from '../web/model.js';
+import { chartIds, enqueue, episodeActivity, httpsUrl, rankedShows, time } from '../web/model.js';
 import { feedAddress, publicAddress, serve } from '../server.mjs';
+
+test('new episodes accumulate once and stay unread until the show opens', () => {
+  const initial = episodeActivity(undefined, ['old', 'older']);
+  assert.equal(initial.unread, 0);
+
+  const firstUpdate = episodeActivity(initial, ['new', 'old', 'new']);
+  assert.equal(firstUpdate.unread, 1);
+  assert.equal(episodeActivity(firstUpdate, ['older', 'old']), firstUpdate);
+
+  const nextUpdate = episodeActivity(firstUpdate, ['newest', 'new', 'old']);
+  assert.equal(nextUpdate.unread, 2);
+  const opened = episodeActivity(nextUpdate, ['just-published', 'newest', 'new'], true);
+  assert.equal(opened.unread, 0);
+  assert.equal(episodeActivity(opened, ['just-published', 'older']), opened);
+  assert.equal(episodeActivity(opened, ['next-release', 'just-published']).unread, 1);
+});
 
 test('category results retain chart order and skip missing or insecure feed URLs', () => {
   const entries = ['4', '2', '7', '3', '2', 'invalid'].map(id => ({ id: { attributes: { 'im:id': id } } }));
