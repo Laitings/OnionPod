@@ -267,21 +267,62 @@ function updateEpisodeBadges() {
   }
 }
 
+function toggleFollow(show) {
+  const url = show.url;
+  const following = state.follows.some(item => item.url === url);
+  if (following) {
+    state.follows = state.follows.filter(item => item.url !== url);
+    delete state.episodeActivity[url];
+    feedCheckAfter.delete(url);
+    sync.record('follow', url, null, true);
+  } else {
+    const { episodes, ...details } = show;
+    details.artwork ||= coverUrls.get(url);
+    state.follows.push(details);
+    if (episodes) markShowOpened(show);
+    sync.record('follow', url, details, true);
+  }
+  save();
+  if (!following) refreshFollowedFeeds();
+  return !following;
+}
+
+function paintFollowButton(control, title, following) {
+  control.textContent = following ? '✓' : '+';
+  control.setAttribute('aria-pressed', String(following));
+  control.title = (following ? 'Unfollow ' : 'Follow ') + title;
+}
+
 function grid(items) {
   const panel = el('div', 'grid');
   const followed = new Set(state.follows.map(show => show.url));
+  const inLibrary = state.page === 'library';
   for (const item of items) {
+    const wrapper = el('article', 'podcast-card');
     const card = button('', () => openFeed(item.url, item), 'card');
     card.append(artwork(item, 'cover', true), el('strong', '', item.title), el('small', '', item.author || 'Podcast'));
     if (item.category) card.append(el('small', 'category', item.category));
-    if (followed.has(item.url)) {
-      const badge = el('span', 'episode-badge');
-      badge.dataset.episodeBadge = item.url;
-      badge.hidden = true;
-      badge.append(el('span'), el('span', 'sr-only'));
-      card.append(badge);
-    }
-    panel.append(card);
+    const badge = el('span', 'episode-badge');
+    badge.dataset.episodeBadge = item.url;
+    badge.hidden = true;
+    badge.append(el('span'), el('span', 'sr-only'));
+    card.append(badge);
+    const followButton = button('', () => {
+      const isFollowing = toggleFollow(item);
+      if (inLibrary && !isFollowing) {
+        const index = Array.from(panel.children).indexOf(wrapper);
+        render();
+        const controls = document.querySelectorAll('#content .card-follow');
+        (controls[Math.min(index, controls.length - 1)] ?? $('[data-page=library]')).focus();
+      } else {
+        paintFollowButton(followButton, item.title, isFollowing);
+        updateEpisodeBadges();
+      }
+    }, 'card-follow');
+    followButton.setAttribute('aria-label', 'Follow ' + item.title);
+    paintFollowButton(followButton, item.title, followed.has(item.url));
+    wrapper.append(card, followButton);
+    panel.append(wrapper);
   }
   return panel;
 }
@@ -452,18 +493,8 @@ function render() {
     const following = state.follows.some(item => item.url === show.url);
     copy.append(el('h1', '', show.title), el('p', 'meta', show.author || 'Podcast'));
     copy.append(button(following ? 'Unfollow' : 'Follow podcast', () => {
-      if (following) {
-        state.follows = state.follows.filter(item => item.url !== show.url);
-        delete state.episodeActivity[show.url];
-        feedCheckAfter.delete(show.url);
-        sync.record('follow', show.url, null, true);
-      } else {
-        const { episodes, ...details } = show;
-        state.follows.push(details);
-        markShowOpened(show);
-        sync.record('follow', show.url, details, true);
-      }
-      save(); render();
+      toggleFollow(show);
+      render();
     }, following ? 'outline' : 'primary'));
     intro.append(artwork(show), copy);
     content.append(intro);
@@ -537,7 +568,10 @@ async function refreshFollowedFeeds() {
     }
   }
   try { await Promise.all(Array.from({ length: Math.min(3, due.length) }, refresh)); }
-  finally { checkingFollows = false; }
+  finally {
+    checkingFollows = false;
+    refreshFollowedFeeds();
+  }
 }
 
 async function loadCategory(category, version) {
