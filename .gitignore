@@ -1,0 +1,25 @@
+# Local secrets and environment configuration
+.env
+.env.*
+!.env.example
+!.env.sample
+*.jks
+*.keystore
+
+# Local operating system and editor state
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# Common dependency and generated output directories
+node_modules/
+.expo/
+.gradle/
+build/
+dist/
+coverage/
+local.properties
+
+# Local logs
+*.log
