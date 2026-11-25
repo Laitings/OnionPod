@@ -2,9 +2,9 @@
 
 ## Product and current state
 
-OnionPod is a podcast player targeting Android and the web. Both platforms are required. This repository currently contains planning and contributor documentation only; the framework, package manager, backend, and hosting have not been selected.
+OnionPod is a podcast player targeting Android and the web. Both platforms are required. The shared interface lives in web/, the web feed relay in server.mjs, and the Android shell and Media3 playback service in android-app/.
 
-The proposed first release includes podcast search, RSS subscriptions, episode browsing, playback and speed controls, a queue, and saved listening progress. Android background playback, lock-screen controls, and offline downloads are proposed platform features. Account-based cross-device sync is a later candidate. These are planning targets, not implemented features or a mandate to build everything in one task.
+The first implementation includes podcast search, RSS subscriptions, episode browsing, playback and speed controls, a queue, and saved listening progress. Android background playback, media controls, and downloads need device verification. Account-based cross-device sync is a later candidate.
 
 ## Before changing code
 
@@ -36,7 +36,7 @@ The proposed first release includes podcast search, RSS subscriptions, episode b
 
 ## Verification and completion
 
-- No build, test, or lint commands exist yet. Add exact setup and verification commands to README.md when the application is scaffolded.
+- Use the setup and verification commands in README.md. Update that guide if the commands or prerequisites change.
 - Run checks appropriate to the change. Add meaningful tests for playback state, queue behavior, progress persistence, and feed parsing as those features are implemented.
 - Verify shared changes on both platforms when tooling is available. Clearly identify any untested platform; never imply that a web build verifies native Android behavior.
 - Verify Android background playback, media controls, and downloads on an emulator or device when implementing those features.

@@ -1,27 +1,37 @@
 # OnionPod
 
-A podcast player planned for Android and the web.
+OnionPod is a podcast player for Android and the web. Search the Apple podcast directory, open a public HTTPS RSS or Atom feed, follow shows, and build a listening queue. The player supports seeking, speed changes, and resuming episodes. The library, queue, and listening progress are saved locally.
 
-## Status
+## Web
 
-Project setup only. No application code or technology stack has been selected yet.
+Install Node.js 22 or later. From the repository root:
 
-## Proposed initial scope
+```sh
+node server.mjs
+```
 
-- Podcast search and RSS subscriptions
-- Episode browsing and audio playback with speed controls
-- Listening queue and saved progress
-- Android background playback and lock-screen controls
-- Android offline episode downloads
+Open [http://127.0.0.1:4173](http://127.0.0.1:4173). No npm install or API credentials are required. Run `node --test` for the web and feed relay checks.
 
-Account-based synchronization between devices is a potential later addition.
+The Node server retrieves directory results and public feeds because browsers cannot read every publisher's feed directly. Audio streams directly from the publisher. The server binds to loopback by default. Use a Node host with HTTPS and request limits when deploying the web app.
 
-## Contributing
+## Android
 
-Read [AGENTS.md](AGENTS.md) before working on the project. All AI and human contributors should follow the same collaboration guidelines. If an AI tool does not automatically load AGENTS.md, explicitly ask it to read the file at the start of its task.
+Open the repository root in Android Studio. Install Android SDK Platform 37 and Build Tools 36.0.0. Use Android Studio's bundled JDK or JDK 17 or later for Gradle. Run `android-app` on an Android 7.0 (API 24) or newer device or emulator with an updated Android System WebView.
 
-Use a focused branch per task and a separate worktree or clone for concurrent contributors. Submit changes through pull requests with a description and verification results.
+With `JAVA_HOME` and `ANDROID_HOME` configured, build and lint from the root:
 
-## Development setup
+```powershell
+.\gradlew.bat :android-app:assembleDebug :android-app:lintDebug
+```
 
-Setup, build, test, and run commands will be documented here when the application stack is selected and scaffolded.
+On macOS or Linux use `./gradlew` in place of `.\gradlew.bat`. The debug APK is at `android-app/build/outputs/apk/debug/android-app-debug.apk`.
+
+Android packages the shared interface locally and accesses feeds directly. Media3 runs the active episode in a playback service and exposes Android media controls. Download episodes from their episode lists and play completed downloads from the Downloads tab. Use a device to verify lock-screen controls, audio focus, background playback and offline playback before release. Queue auto-advance currently depends on the app screen being active on Android.
+
+## Project layout
+
+- `web/` contains the shared HTML, CSS, and JavaScript. It has no framework or build step.
+- `server.mjs` serves the web interface and relays directory and feed requests.
+- `android-app/` packages the interface in a WebView and handles native playback and downloads.
+
+The shared interface keeps product behavior consistent. Native Android code keeps playback independent of the screen for an active episode and uses the system download manager. Each installation maintains its own data. See [AGENTS.md](AGENTS.md) for contributor guidance.
