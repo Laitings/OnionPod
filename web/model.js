@@ -6,7 +6,23 @@ export const catalog = [
   { title: 'The Moth', author: 'The Moth', category: 'STORIES', color: 'lilac', mark: '✳', url: 'https://rss.amperwave.net/v2/feed/audacynetwork/the-moth',
     artwork: 'https://images.castfire.com/image/661/0/0/0/0-8486082.jpg' },
   { title: 'Radiolab', author: 'WNYC Studios', category: 'SCIENCE', color: 'coral', mark: '◉', url: 'https://feeds.simplecast.com/EmVW7VGp',
-    artwork: 'https://image.simplecastcdn.com/images/2c9187d6-9dff-4257-bc55-469cf13afd48/60a2cfed-b8ca-460b-abb8-8ab0afb3fa8c/3000x3000/radiolab-showsquare-3000x3000.jpg' }
+    artwork: 'https://image.simplecastcdn.com/images/2c9187d6-9dff-4257-bc55-469cf13afd48/60a2cfed-b8ca-460b-abb8-8ab0afb3fa8c/3000x3000/radiolab-showsquare-3000x3000.jpg' },
+  { title: 'Genstart', author: 'DR', category: 'NEWS · DANISH', color: 'lilac', mark: 'G', url: 'https://api.dr.dk/podcasts/v1/feeds/genstart.xml?format=podcast',
+    artwork: 'https://api.dr.dk/podcasts/v1/images/urn:dr:podcast:image:67e13b366273e8fc7077613e.jpg' },
+  { title: 'The Rest Is History', author: 'Goalhanger', category: 'HISTORY', color: 'amber', mark: 'H', url: 'https://feeds.megaphone.fm/GLT4787413333',
+    artwork: 'https://megaphone-images.spotifycdn.com/podcasts/00c0a118-2426-11ee-b258-73d331d0123b/image/fc1621e5c07895ac8ebabab7c8e2e40d.jpg?ixlib=rails-4.3.1&max-w=3000&max-h=3000&fit=crop&auto=format,compress' },
+  { title: 'Hard Fork', author: 'The New York Times', category: 'TECHNOLOGY', color: 'mint', mark: 'HF', url: 'https://feeds.simplecast.com/6HKOhNgS',
+    artwork: 'https://image.simplecastcdn.com/images/4105a47a-42e5-4ccc-887a-832af7989986/23965394-f5e4-4fdb-b150-639f4910353e/3000x3000/nyt-hf-album-art-3000-2.jpg?aid=rss_feed' },
+  { title: 'Conan O’Brien Needs a Friend', author: 'Team Coco & Earwolf', category: 'COMEDY', color: 'coral', mark: 'C', url: 'https://feeds.simplecast.com/dHoohVNH',
+    artwork: 'https://image.simplecastcdn.com/images/8436e3c1-2479-4466-ac48-fa58259960bb/371e5714-91ee-4e31-9ef3-cdd31ebfb9f5/3000x3000/conanobrienneedsafriend-keyart-sxm-3000x3000.jpg?aid=rss_feed' },
+  { title: 'Ologies with Alie Ward', author: 'Alie Ward', category: 'SCIENCE', color: 'mint', mark: 'O', url: 'https://feeds.simplecast.com/FO6kxYGj',
+    artwork: 'https://image.simplecastcdn.com/images/89060b63-e603-4297-b6e8-5a654e50244e/f9713c33-7eca-4512-8d96-7a668e274cb2/3000x3000/image.jpg?aid=rss_feed' },
+  { title: 'Criminal', author: 'Phoebe Judge', category: 'TRUE CRIME', color: 'lilac', mark: 'C', url: 'https://feeds.megaphone.fm/VMP7924981569',
+    artwork: 'https://megaphone-images.spotifycdn.com/podcasts/f547b046-5de4-11ec-acc5-733706bb297f/image/9ed2d59bc3ab179245d05a3c10636f99.png?max-w=600&max-h=600&fit=crop&auto=format,compress' },
+  { title: 'Gastropod', author: 'Cynthia Graber & Nicola Twilley', category: 'FOOD', color: 'amber', mark: 'G', url: 'https://feeds.megaphone.fm/VMP6255701211',
+    artwork: 'https://megaphone-images.spotifycdn.com/podcasts/97d6d85e-e320-11eb-be6b-3ff4d7cb8782/image/3af290d77dd48789f45dcd5a93483cd1.png?ixlib=rails-4.3.1&max-w=3000&max-h=3000&fit=crop&auto=format,compress' },
+  { title: 'The Daily', author: 'The New York Times', category: 'NEWS', color: 'coral', mark: 'D', url: 'https://feeds.simplecast.com/Sl5CSM3S',
+    artwork: 'https://image.simplecastcdn.com/images/7f2f4c05-9c2f-4deb-82b7-b538062bc22d/73549bf1-94b3-40ff-8aeb-b4054848ec1b/3000x3000/the-daily-album-art-original.jpg?aid=rss_feed' }
 ];
 
 export const categories = [
