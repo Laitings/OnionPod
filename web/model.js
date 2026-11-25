@@ -81,6 +81,33 @@ export function readArtwork(xml, base, DOM = globalThis.DOMParser) {
   return channelArtwork(readChannel(xml, DOM), base);
 }
 
+function descriptionText(markup) {
+  // A template keeps feed markup inert. Only extracted text reaches the app UI.
+  const template = globalThis.document.createElement('template');
+  template.innerHTML = markup;
+  for (const node of template.content.querySelectorAll('script, style, iframe, object, noscript')) node.remove();
+  for (const node of template.content.querySelectorAll('p, div, li, blockquote, h1, h2, h3, br')) {
+    node.after('\n');
+  }
+  return template.content.textContent
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function showDescription(channel) {
+  for (const name of ['description', 'summary', 'subtitle']) {
+    for (const node of channel.children) {
+      if (node.localName !== name) continue;
+      const value = node.children.length ? node.innerHTML : node.textContent;
+      const description = descriptionText(value);
+      if (description) return description;
+    }
+  }
+  return '';
+}
+
 export function parseFeed(xml, base, original, DOM = globalThis.DOMParser) {
   const channel = readChannel(xml, DOM);
   const title = text(channel, 'title') || 'Untitled podcast';
@@ -104,7 +131,10 @@ export function parseFeed(xml, base, original, DOM = globalThis.DOMParser) {
       date: text(item, 'pubDate') || text(item, 'published') || text(item, 'updated')
     });
   }
-  return { url: original, title, artwork, author: text(channel, 'author') || text(channel, 'creator'), episodes };
+  return {
+    url: original, title, artwork, description: showDescription(channel),
+    author: text(channel, 'author') || text(channel, 'creator'), episodes
+  };
 }
 
 export function enqueue(queue, episode) {

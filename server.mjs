@@ -69,6 +69,7 @@ const assets = new Map([
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/model.js', ['model.js', 'text/javascript; charset=utf-8']],
+  ['/artwork-worker.js', ['artwork-worker.js', 'text/javascript; charset=utf-8']],
   ['/site.webmanifest', ['site.webmanifest', 'application/manifest+json']],
   ...[32, 180, 192, 512].map(size => {
     const file = 'icons/onionpod-' + size + '.png';

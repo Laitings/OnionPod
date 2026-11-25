@@ -1,6 +1,5 @@
 package app.onionpod;
 
-import android.app.Activity;
 import android.app.DownloadManager;
 import android.content.ComponentName;
 import android.content.SharedPreferences;
@@ -14,6 +13,9 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import androidx.activity.ComponentActivity;
+import androidx.activity.OnBackPressedCallback;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MediaMetadata;
@@ -23,6 +25,8 @@ import androidx.media3.session.SessionToken;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
+import androidx.webkit.ServiceWorkerClientCompat;
+import androidx.webkit.ServiceWorkerControllerCompat;
 import com.google.common.util.concurrent.ListenableFuture;
 import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
@@ -34,7 +38,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public final class MainActivity extends Activity {
+public final class MainActivity extends ComponentActivity {
     private static final String ORIGIN = "https://appassets.androidplatform.net";
     private final ExecutorService io = Executors.newFixedThreadPool(2);
     private ListenableFuture<MediaController> controllerFuture;
@@ -43,22 +47,33 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
+            .addPathHandler("/app/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE)
+                && WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_SHOULD_INTERCEPT_REQUEST)) {
+            ServiceWorkerControllerCompat.getInstance().setServiceWorkerClient(new ServiceWorkerClientCompat() {
+                @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest request) {
+                    return assets.shouldInterceptRequest(request.getUrl());
+                }
+            });
+        }
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(Color.rgb(21, 23, 19));
+        if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+            root.setOnApplyWindowInsetsListener((element, insets) -> {
+                android.graphics.Insets edges = insets.getInsets(android.view.WindowInsets.Type.systemBars()
+                    | android.view.WindowInsets.Type.displayCutout() | android.view.WindowInsets.Type.ime());
+                element.setPadding(edges.left, edges.top, edges.right, edges.bottom);
+                return android.view.WindowInsets.CONSUMED;
+            });
+        }
         view = new WebView(this);
         view.setBackgroundColor(Color.rgb(17, 19, 16));
         view.getSettings().setJavaScriptEnabled(true);
-        view.setOnApplyWindowInsetsListener((element, insets) -> {
-            if (Build.VERSION.SDK_INT >= 30) {
-                android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars()
-                    | android.view.WindowInsets.Type.displayCutout() | android.view.WindowInsets.Type.ime());
-                element.setPadding(bars.left, bars.top, bars.right, bars.bottom);
-            }
-            return insets;
-        });
         view.getSettings().setDomStorageEnabled(true);
         view.getSettings().setAllowFileAccess(false);
         view.getSettings().setAllowContentAccess(false);
-        WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
-            .addPathHandler("/app/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
         view.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView web, WebResourceRequest request) {
                 return assets.shouldInterceptRequest(request.getUrl());
@@ -94,8 +109,17 @@ public final class MainActivity extends Activity {
         controllerFuture.addListener(() -> {
             try { player = controllerFuture.get(); } catch (Exception ignored) { }
         }, command -> runOnUiThread(command));
-        setContentView(view);
+        root.addView(view, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT));
+        setContentView(root);
+        root.requestApplyInsets();
         view.loadUrl(ORIGIN + "/app/index.html");
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override public void handleOnBackPressed() {
+                if (view.canGoBack()) view.goBack();
+                else if (!moveTaskToBack(false)) finish();
+            }
+        });
     }
 
     private Object execute(JSONObject request) throws Exception {

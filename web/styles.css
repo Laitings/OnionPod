@@ -21,6 +21,7 @@ nav small{margin-left:auto}
 .sidebar-bottom small{margin-left:auto}
 main{margin-left:var(--sidebar);padding-bottom:calc(var(--player) + 38px)}
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:17px clamp(18px,4vw,51px);min-height:76px;border-bottom:1px solid var(--line);font-weight:680}
+.topbar-start{display:flex;align-items:center;gap:14px}
 .content{max-width:1320px;margin:auto;padding:30px clamp(18px,4vw,51px) 0}
 .hero{padding:clamp(22px,4vw,52px);border:1px solid #44533b;border-radius:22px;min-height:268px;position:relative;overflow:hidden;background:radial-gradient(ellipse at 100% 20%,#3f5030 0%,#23301e 42%,#1b261b 75%)}
 .hero:before,.hero:after{content:'';position:absolute;pointer-events:none;border-radius:50%;width:300px;aspect-ratio:1;right:-45px;top:-22px;background:repeating-radial-gradient(circle,transparent 0 16px,#c8ef7c33 17px 18px,transparent 19px 29px);transform:rotate(-26deg) scaleX(.8)}
@@ -58,6 +59,9 @@ h2{font-size:25px;letter-spacing:-.035em}
 .show-header .cover{width:clamp(84px,19vw,170px);flex-shrink:0}
 .show-header h1{font-size:clamp(29px,5vw,57px);overflow-wrap:anywhere}
 .show-header .meta{margin:8px 0}
+.show-description{margin:0 0 28px;max-width:72ch}
+.show-description h2{margin-bottom:8px}
+.show-description p{color:var(--muted);line-height:1.55;white-space:pre-line;overflow-wrap:anywhere}
 .back{color:var(--accent);padding:0}
 .episodes{display:grid;gap:8px}
 .episode{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);background:var(--surface);padding:10px 12px;border-radius:10px}

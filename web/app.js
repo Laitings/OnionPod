@@ -23,6 +23,8 @@ let nativeId = 0;
 let endedKey = '';
 const waiting = new Map();
 const chartCache = new Map();
+const searchCache = new Map();
+const initialRoute = { page: 'discover', depth: 0 };
 const tabs = {
   discover: 'Discover', categories: 'Categories', category: 'Categories', show: 'Podcast',
   library: 'Library', queue: 'Queue', downloads: 'Downloads'
@@ -31,6 +33,7 @@ const coverUrls = new Map(catalog.map(show => [show.url, show.artwork]));
 const coverJobs = new Map();
 let activeCoverJobs = 0;
 const pendingCovers = [];
+const artworkReady = setupArtworkCache();
 const coverObserver = new IntersectionObserver(entries => {
   for (const entry of entries) {
     if (!entry.isIntersecting) continue;
@@ -90,15 +93,37 @@ function button(label, fn, cls = 'outline') {
   element.addEventListener('click', fn);
   return element;
 }
+function setupArtworkCache() {
+  if (!('serviceWorker' in navigator)) return Promise.resolve();
+  const worker = navigator.serviceWorker;
+  worker.register('./artwork-worker.js').catch(() => {});
+  if (worker.controller) return Promise.resolve();
+  return new Promise(resolve => {
+    const ready = () => {
+      clearTimeout(timer);
+      worker.removeEventListener('controllerchange', ready);
+      resolve();
+    };
+    const timer = setTimeout(ready, 1200);
+    worker.addEventListener('controllerchange', ready);
+  });
+}
+
 function showImage(panel, source) {
   if (!httpsUrl(source)) return;
   const image = el('img');
   image.alt = '';
   image.loading = 'lazy';
   image.referrerPolicy = 'no-referrer';
-  image.addEventListener('error', () => image.remove());
-  image.src = source;
-  panel.append(image);
+  image.addEventListener('error', () => {
+    navigator.serviceWorker?.controller?.postMessage({ type: 'forget-artwork', url: source });
+    image.remove();
+  });
+  artworkReady.then(() => {
+    if (!panel.isConnected) return;
+    image.src = source;
+    panel.append(image);
+  });
 }
 
 function loadVisibleCovers() {
@@ -155,13 +180,38 @@ function grid(items) {
   return panel;
 }
 
-function go(page) {
-  generation++;
-  state.page = page;
+function navigate(route) {
+  const previous = history.state?.onionPod ?? initialRoute;
+  if (route.page === previous.page && route.query === previous.query &&
+      route.categoryId === previous.categoryId && route.url === previous.url) return;
+  const next = { ...route, depth: previous.depth + 1 };
+  history.pushState({ onionPod: next }, '');
+  showRoute(next);
+}
+
+function showRoute(route) {
+  const version = ++generation;
+  state.page = route.page;
   state.loading = false;
   state.message = '';
-  render();
+  $('#feed-dialog').close();
+  if (route.page === 'category') {
+    loadCategory(categories.find(category => category.id === route.categoryId), version);
+  } else if (route.page === 'show') {
+    state.returnPage = route.from;
+    state.backLabel = route.backLabel;
+    loadFeed(route.url, route.hint, version);
+  } else if (route.page === 'discover' && route.query) {
+    loadSearch(route.query, version);
+  } else {
+    if (route.page === 'discover') { state.query = ''; state.results = null; }
+    render();
+  }
   window.scrollTo(0, 0);
+}
+
+function goBack() {
+  if (history.state?.onionPod?.depth > 0) history.back();
 }
 
 function insertList(target, episodes, context) {
@@ -219,6 +269,7 @@ function insertList(target, episodes, context) {
 
 function render() {
   const page = state.page;
+  $('#app-back').hidden = !history.state?.onionPod?.depth || page === 'show' || page === 'category';
   const parent = page === 'show' ? state.returnPage : page;
   const activeTab = parent === 'category' ? 'categories' : parent;
   for (const tab of document.querySelectorAll('[data-page]')) {
@@ -239,24 +290,29 @@ function render() {
     input.placeholder = 'Search for a podcast'; input.value = state.query;
     input.setAttribute('aria-label', 'Search for a podcast');
     form.append(input, el('button', 'primary', 'Search'));
-    form.addEventListener('submit', event => { event.preventDefault(); search(input.value.trim()); });
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      const query = input.value.trim();
+      if (query) navigate({ page: 'discover', query });
+    });
     hero.append(el('h1', '', 'Find your next listen.'), el('p', '', 'Search for a podcast or browse the picks below.'), form);
     content.append(hero);
     const section = el('section', 'section');
     const heading = el('div', 'section-head');
     heading.append(el('h2', '', state.results ? 'Search results' : 'Explore podcasts'));
-    if (state.results) heading.append(button('Clear search', () => {
-      generation++; state.results = null; state.query = ''; state.loading = false; state.message = ''; render();
-    }));
+    if (state.results) heading.append(button('Clear search', () => navigate({ page: 'discover' })));
     section.append(heading);
-    if (state.loading || state.message) section.append(el('p', 'empty', state.message || 'Searching…'));
+    if (state.loading || state.message) {
+      section.append(el('p', 'empty', state.message || 'Searching…'));
+      if (state.message) section.append(button('Try again', () => loadSearch(state.query, ++generation)));
+    }
     else if (state.results && !state.results.length) section.append(el('p', 'empty', 'No podcasts matched your search.'));
     else section.append(grid(state.results ?? catalog));
     content.append(section);
   } else if (page === 'categories') {
     const list = el('div', 'category-grid');
     for (const category of categories) {
-      const card = button('', () => openCategory(category), 'category-card');
+      const card = button('', () => navigate({ page: 'category', categoryId: category.id }), 'category-card');
       const mark = el('span', 'category-mark', category.mark);
       mark.setAttribute('aria-hidden', 'true');
       card.append(mark, el('strong', '', category.title));
@@ -265,12 +321,12 @@ function render() {
     content.append(el('h1', '', 'Categories'), list);
   } else if (page === 'category') {
     const category = state.category;
-    content.append(button('Back to categories', () => go('categories'), 'back'), el('h1', '', category.title));
+    content.append(button('Back to categories', goBack, 'back'), el('h1', '', category.title));
     if (state.loading || state.message) {
       const status = el('p', 'empty', state.message || 'Loading podcasts…');
       status.setAttribute('role', 'status');
       content.append(status);
-      if (state.message) content.append(button('Try again', () => openCategory(category)));
+      if (state.message) content.append(button('Try again', () => loadCategory(category, ++generation)));
     } else {
       const heading = el('div', 'section-head');
       heading.append(el('h2', '', 'Top podcasts'), el('small', '', 'Apple Podcasts · US'));
@@ -278,11 +334,7 @@ function render() {
       content.append(heading, shows.length ? grid(shows) : el('p', 'empty', 'No public HTTPS feeds are available in this category right now.'));
     }
   } else if (page === 'show') {
-    const back = state.returnPage === 'category' ? state.category.title : tabs[state.returnPage].toLowerCase();
-    content.append(button('Back to ' + back, () => {
-      if (state.returnPage === 'category') openCategory(state.category);
-      else go(state.returnPage);
-    }, 'back'));
+    content.append(button(state.backLabel, goBack, 'back'));
     if (!state.show) {
       content.append(el('p', 'empty', state.message || 'Loading episodes…'));
       return;
@@ -302,6 +354,11 @@ function render() {
     }, following ? 'outline' : 'primary'));
     intro.append(artwork(show), copy);
     content.append(intro);
+    if (show.description) {
+      const about = el('section', 'show-description');
+      about.append(el('h2', '', 'About the podcast'), el('p', '', show.description));
+      content.append(about);
+    }
     const header = el('div', 'section-head');
     header.append(el('h2', '', 'Episodes'), el('small', '', String(show.episodes.length)));
     content.append(header);
@@ -330,14 +387,11 @@ function requestSource(url) {
   return request('/api/feed?url=' + encodeURIComponent(url), url);
 }
 
-async function openCategory(category) {
-  const version = ++generation;
+async function loadCategory(category, version) {
   state.category = category;
-  state.page = 'category';
   state.message = '';
   state.loading = !chartCache.has(category.id);
   render();
-  window.scrollTo(0, 0);
   if (!state.loading) return;
   try {
     const chart = await requestSource('https://itunes.apple.com/us/rss/toppodcasts/limit=25/genre=' + category.id + '/json');
@@ -357,16 +411,18 @@ async function openCategory(category) {
   }
 }
 
-async function search(query) {
-  if (!query) return;
-  const version = ++generation;
-  state.query = query; state.loading = true; state.message = ''; state.results = [];
+async function loadSearch(query, version) {
+  state.query = query;
+  state.loading = !searchCache.has(query);
+  state.results = searchCache.get(query) ?? [];
   render();
+  if (!state.loading) return;
   try {
     const params = new URLSearchParams({ term: query, media: 'podcast', limit: '18' });
     const { body } = await request('/api/search?q=' + encodeURIComponent(query), 'https://itunes.apple.com/search?' + params);
     if (version !== generation) return;
     state.results = directoryShows(JSON.parse(body).results ?? []);
+    searchCache.set(query, state.results);
   } catch (error) {
     if (version === generation) state.message = 'Search could not load. ' + error.message;
   } finally {
@@ -374,13 +430,19 @@ async function search(query) {
   }
 }
 
-async function openFeed(value, hint = {}) {
+function openFeed(value, hint = {}) {
   const url = httpsUrl(value);
   if (!url) { notice('Enter a valid HTTPS feed URL.'); return; }
-  const version = ++generation;
-  if (state.page !== 'show') state.returnPage = state.page;
-  state.page = 'show'; state.show = null; state.message = ''; state.episodeLimit = 50;
-  render(); window.scrollTo(0, 0);
+  const from = state.page === 'show' ? state.returnPage : state.page;
+  const back = state.page === 'show' ? 'previous podcast'
+    : state.page === 'category' ? state.category.title : tabs[from].toLowerCase();
+  navigate({ page: 'show', url, hint, from, backLabel: 'Back to ' + back });
+}
+
+async function loadFeed(url, hint, version) {
+  state.show = null;
+  state.episodeLimit = 50;
+  render();
   try {
     const data = await requestSource(url);
     const show = parseFeed(data.body, data.url, url);
@@ -562,7 +624,10 @@ if (audio) {
   for (const item of state.downloads) item.checked = false;
 }
 
-for (const tab of document.querySelectorAll('[data-page]')) tab.addEventListener('click', () => go(tab.dataset.page));
+for (const tab of document.querySelectorAll('[data-page]')) {
+  tab.addEventListener('click', () => navigate({ page: tab.dataset.page }));
+}
+$('#app-back').onclick = goBack;
 $('#add-feed').onclick = () => $('#feed-dialog').showModal();
 $('#cancel-feed').onclick = () => $('#feed-dialog').close();
 $('#feed-form').onsubmit = event => {
@@ -585,4 +650,7 @@ $('#rate').onchange = async event => {
   } catch (error) { notice(error.message); }
 };
 window.addEventListener('pagehide', () => checkpoint(true));
-render(); player();
+window.addEventListener('popstate', event => showRoute(event.state?.onionPod ?? initialRoute));
+if (!history.state?.onionPod) history.replaceState({ onionPod: initialRoute }, '');
+showRoute(history.state.onionPod);
+player();
