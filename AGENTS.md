@@ -4,7 +4,7 @@
 
 OnionPod is a podcast player targeting Android and the web. Both platforms are required. The shared interface lives in web/, the web feed relay in server.mjs, and the Android shell and Media3 playback service in android-app/.
 
-The first implementation includes podcast search, RSS subscriptions, episode browsing, playback and speed controls, a queue, and saved listening progress. Android background playback, media controls, and downloads need device verification. Account-based cross-device sync is a later candidate.
+The first implementation includes podcast search, RSS subscriptions, episode browsing, playback and speed controls, a queue, and saved listening progress. A provisioned owner account can sync follows and playback positions through the server. See README.md for private staging and device verification.
 
 ## Before changing code
 

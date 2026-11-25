@@ -22,6 +22,8 @@ nav small{margin-left:auto}
 main{margin-left:var(--sidebar);padding-bottom:calc(var(--player) + 38px)}
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:17px clamp(18px,4vw,51px);min-height:76px;border-bottom:1px solid var(--line);font-weight:680}
 .topbar-start{display:flex;align-items:center;gap:14px}
+.topbar-actions{display:flex;gap:6px}
+#sync-dialog > :not(:first-child){margin-top:12px}
 .content{max-width:1320px;margin:auto;padding:30px clamp(18px,4vw,51px) 0}
 .hero{padding:clamp(22px,4vw,52px);border:1px solid #44533b;border-radius:22px;min-height:268px;position:relative;overflow:hidden;background:radial-gradient(ellipse at 100% 20%,#3f5030 0%,#23301e 42%,#1b261b 75%)}
 .hero:before,.hero:after{content:'';position:absolute;pointer-events:none;border-radius:50%;width:300px;aspect-ratio:1;right:-45px;top:-22px;background:repeating-radial-gradient(circle,transparent 0 16px,#c8ef7c33 17px 18px,transparent 19px 29px);transform:rotate(-26deg) scaleX(.8)}
@@ -118,4 +120,6 @@ dialog form{display:grid;gap:12px}
  .category-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
  .category-card{padding:8px;gap:7px}
  .category-mark{flex-basis:28px;height:28px;font-size:19px}
+ .topbar-start{gap:6px}
+ .topbar-actions .outline{padding:0 8px}
 }

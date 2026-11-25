@@ -41,12 +41,15 @@ import java.util.concurrent.Executors;
 public final class MainActivity extends ComponentActivity {
     private static final String ORIGIN = "https://appassets.androidplatform.net";
     private final ExecutorService io = Executors.newFixedThreadPool(2);
+    private final ExecutorService syncIo = Executors.newSingleThreadExecutor();
+    private SyncTransport syncTransport;
     private ListenableFuture<MediaController> controllerFuture;
     private MediaController player;
     private WebView view;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        syncTransport = new SyncTransport(this);
         WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
             .addPathHandler("/app/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
         if (WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE)
@@ -99,7 +102,9 @@ public final class MainActivity extends ComponentActivity {
                             }
                             runOnUiThread(() -> { if (!isDestroyed()) reply.postMessage(result.toString()); });
                         };
-                        if (input.optString("action").equals("fetch")) io.execute(handle);
+                        String action = input.optString("action");
+                        if (action.equals("fetch")) io.execute(handle);
+                        else if (action.startsWith("sync-")) syncIo.execute(handle);
                         else handle.run();
                     } catch (Exception ignored) { }
                 });
@@ -125,6 +130,12 @@ public final class MainActivity extends ComponentActivity {
     private Object execute(JSONObject request) throws Exception {
         String action = request.getString("action");
         JSONObject data = request.getJSONObject("data");
+        if (action.startsWith("sync-")) return syncTransport.request(action.substring(5), data);
+        if (action.equals("local-progress")) return PlaybackProgress.pending(this);
+        if (action.equals("local-progress-ack")) {
+            PlaybackProgress.acknowledge(this, data.getJSONArray("events"));
+            return true;
+        }
         if (action.equals("fetch")) return fetch(data.getString("url"));
         if (action.equals("download") || action.equals("offline") || action.equals("remove")) {
             return downloads(action, data);
@@ -132,13 +143,18 @@ public final class MainActivity extends ComponentActivity {
         if (player == null) throw new IllegalStateException("The Android player is still connecting.");
         switch (action) {
             case "load":
+                MediaItem previous = player.getCurrentMediaItem();
+                if (previous != null && player.getPlaybackState() != Player.STATE_IDLE
+                        && player.getPlaybackState() != Player.STATE_ENDED) {
+                    PlaybackProgress.save(this, previous.mediaId, player.getCurrentPosition());
+                }
                 String key = data.getString("key");
                 Uri local = offlineUri(downloadId(key));
                 MediaItem item = new MediaItem.Builder().setMediaId(key)
                     .setUri(local == null ? Uri.parse(https(data.getString("audio")).toString()) : local)
                     .setMediaMetadata(new MediaMetadata.Builder().setTitle(data.getString("title"))
                         .setArtist(data.getString("show")).build()).build();
-                long position = getSharedPreferences("progress", MODE_PRIVATE).getLong(key, 0);
+                long position = PlaybackProgress.chooseResume(this, key, data);
                 player.setMediaItem(item, position);
                 player.setPlaybackSpeed((float) data.getDouble("rate"));
                 player.prepare();
@@ -147,7 +163,10 @@ public final class MainActivity extends ComponentActivity {
             case "toggle":
                 if (player.getPlayWhenReady() && player.getPlaybackState() != Player.STATE_ENDED) player.pause();
                 else {
-                    if (player.getPlaybackState() == Player.STATE_ENDED) player.seekTo(0);
+                    MediaItem current = player.getCurrentMediaItem();
+                    if (current != null && data.has("resume") && data.optLong("resumeAt", 0) > PlaybackProgress.time(this, current.mediaId)) {
+                        player.seekTo(PlaybackProgress.chooseResume(this, current.mediaId, data));
+                    } else if (player.getPlaybackState() == Player.STATE_ENDED) player.seekTo(0);
                     player.play();
                 }
                 return true;
@@ -244,6 +263,7 @@ public final class MainActivity extends ComponentActivity {
     @Override public void onDestroy() {
         MediaController.releaseFuture(controllerFuture);
         io.shutdownNow();
+        syncIo.shutdownNow();
         view.destroy();
         super.onDestroy();
     }

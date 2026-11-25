@@ -1,6 +1,11 @@
 plugins {
     id 'com.android.application' version '9.1.1'
 }
+def syncOrigin = providers.gradleProperty('onionpodSyncOrigin')
+    .getOrElse('')
+if (syncOrigin && !(syncOrigin ==~ /https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?/)) {
+    throw new GradleException('onionpodSyncOrigin must be an HTTPS origin.')
+}
 
 android {
     namespace 'app.onionpod'
@@ -12,9 +17,11 @@ android {
         targetSdk 36
         versionCode 1
         versionName '0.1.0'
+        buildConfigField 'String', 'SYNC_ORIGIN', '"' + syncOrigin + '"'
     }
 
     sourceSets.main.assets.srcDir('../web')
+    buildFeatures { buildConfig = true }
 }
 
 dependencies {

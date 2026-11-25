@@ -4,15 +4,34 @@ OnionPod is a podcast player for Android and the web. Search the Apple podcast d
 
 ## Web
 
-Install Node.js 22 or later. From the repository root:
+Install Node.js 22.13 or later. From the repository root:
 
 ```sh
 node server.mjs
 ```
 
-Open [http://127.0.0.1:4173](http://127.0.0.1:4173). No npm install or API credentials are required. Run `node --test` for the web and feed relay checks.
+Open [http://127.0.0.1:4173](http://127.0.0.1:4173). No npm install or API credentials are required for local browsing. Run `node --test` for the web, feed relay, and account sync checks.
 
 The Node server retrieves directory results and public feeds because browsers cannot read every publisher's feed directly. Audio streams directly from the publisher. The server binds to loopback by default. Use a Node host with HTTPS and request limits when deploying the web app.
+
+## Private sync staging on Synology
+
+Use the existing Container Manager project and keep the `OnionPod Private` reverse-proxy profile in place during testing. The Node container's host port should stay bound to `127.0.0.1:4173`. The app reads these environment variables:
+
+- `DATA_DIR=/data` enables sync and protects the web search and feed relay with sign-in. Back up the persistent directory with a SQLite-aware backup or stop the container before copying it. Sessions and sync state are stored in `onionpod.sqlite3`.
+- `PUBLIC_ORIGIN=https://podcasts.example.com` sets the browser origin allowed to sign in and exchange data. Set it to your actual HTTPS address without a trailing slash or path. Pass the same origin with `-PonionpodSyncOrigin=https://podcasts.example.com` when building the Android app.
+
+After deploying the code to private staging, provision the single owner account inside the running container. Substitute the service name from `docker compose -f /volume1/docker/onionpod/compose.yaml config --services`:
+
+```sh
+docker compose -f /volume1/docker/onionpod/compose.yaml exec SERVICE node sync-admin.mjs
+```
+
+Save the generated password in a password manager. Using `node sync-admin.mjs --rotate` replaces the password and revokes all sessions without deleting follows or progress. The app has no public account registration.
+
+Open **Sync** on the web and Android and sign in with the same password. The first sign-in imports existing follows and listening positions. Both apps keep local changes and retry when they can reach the server. Android also uploads playback checkpoints while its playback service runs. The latest dated update wins, so a recent rewind or unfollow is preserved. Queue, download files, and new episode badge counts stay on each device.
+
+Before making the site reachable from mobile data, verify that a signed-out request to `/api/search?q=podcast` and `/api/feed?url=https://example.com/feed.xml` receives HTTP 401 from OnionPod on an allowed network. In private staging, test follow and unfollow in both directions, then pause an episode on Android and resume it on the web. Verify Movie Tracker still works. Repeat the phone test over mobile data after the NAS access profile is deliberately opened.
 
 ## Android
 
@@ -34,4 +53,4 @@ Android packages the shared interface locally and accesses feeds directly. Media
 - `server.mjs` serves the web interface and relays directory and feed requests.
 - `android-app/` packages the interface in a WebView and handles native playback and downloads.
 
-The shared interface keeps product behavior consistent. Native Android code keeps playback independent of the screen for an active episode and uses the system download manager. Each installation maintains its own data. See [AGENTS.md](AGENTS.md) for contributor guidance.
+The shared interface keeps product behavior consistent. Native Android code keeps playback independent of the screen for an active episode and uses the system download manager. See [AGENTS.md](AGENTS.md) for contributor guidance.

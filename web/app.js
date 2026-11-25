@@ -1,4 +1,5 @@
 import { catalog, categories, directoryShows, chartIds, rankedShows, httpsUrl, parseFeed, readArtwork, readEpisodeIds, episodeActivity, enqueue, time } from './model.js';
+import { createSync } from './sync.js';
 
 const $ = selector => document.querySelector(selector);
 const native = window.OnionNative;
@@ -18,6 +19,7 @@ let playing = false;
 let activeKey = '';
 let busy = false;
 let lastCheckpoint = 0;
+const observedPositions = new Map();
 let generation = 0;
 let noticeTimer;
 let nativeId = 0;
@@ -38,6 +40,20 @@ const coverJobs = new Map();
 let activeCoverJobs = 0;
 const pendingCovers = [];
 const artworkReady = setupArtworkCache();
+const sync = createSync({
+  saved: saved.syncState,
+  call: syncRequest,
+  persist: save,
+  local: () => ({ follows: state.follows, progress: state.progress }),
+  collect: native ? async ingest => {
+    const pending = await android('local-progress');
+    if (!pending.length) return;
+    ingest(pending);
+    if (save()) await android('local-progress-ack', { events: pending });
+  } : null,
+  apply: applySync,
+  paint: paintSync
+});
 const coverObserver = new IntersectionObserver(entries => {
   for (const entry of entries) {
     if (!entry.isIntersecting) continue;
@@ -73,8 +89,69 @@ function android(action, data = {}) {
 
 function save() {
   const { follows, queue, progress, current, rate, downloads, episodeActivity } = state;
-  try { localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, downloads, episodeActivity })); }
-  catch { notice('OnionPod could not save changes on this device.'); }
+  try {
+    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, downloads, episodeActivity, syncState: sync.data }));
+    return true;
+  } catch {
+    notice('OnionPod could not save changes on this device.');
+    return false;
+  }
+}
+
+async function syncRequest(action, data) {
+  let status, body;
+  if (native) {
+    ({ status, body } = await android('sync-' + action, data));
+  } else {
+    const response = await fetch('/api/sync/' + action, data === undefined ? {} : {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+    });
+    status = response.status;
+    try { body = await response.json(); } catch { body = {}; }
+  }
+  if (status >= 200 && status < 300 && (action !== 'session' || typeof body?.enabled === 'boolean')) return body;
+  const error = new Error(body?.error || (status === 403
+    ? 'This network cannot reach the private sync server.' : 'The sync server is unavailable.'));
+  error.status = status;
+  throw error;
+}
+
+function applySync(changes) {
+  let libraryChanged = false;
+  let progressChanged = false;
+  for (const { type, key, value } of changes) {
+    if (type === 'follow') {
+      const existing = state.follows.some(show => show.url === key);
+      if (value === null && existing) {
+        state.follows = state.follows.filter(show => show.url !== key);
+        delete state.episodeActivity[key];
+        feedCheckAfter.delete(key);
+        libraryChanged = true;
+      } else if (value && !existing) {
+        state.follows.push(value);
+        libraryChanged = true;
+      }
+    } else if (state.progress[key] !== value) {
+      state.progress[key] = value;
+      progressChanged = true;
+      if (state.current?.key === key && !playing && !activeKey) {
+        position = value;
+        player();
+      }
+    }
+  }
+  if (libraryChanged || (progressChanged && !playing && ['show', 'queue', 'downloads'].includes(state.page))) render();
+  if (libraryChanged) refreshFollowedFeeds();
+}
+
+function paintSync() {
+  const { enabled, message } = sync.status();
+  const connected = sync.data.signedIn;
+  $('#sync-form').hidden = connected || enabled === false;
+  $('#sync-controls').hidden = !connected;
+  $('#sync-status').textContent = message || (connected ? 'Signed in. Your follows and listening progress sync here.'
+    : enabled === false ? 'Sync is waiting for the server account to be set up.'
+      : 'Sign in with the same OnionPod sync password on both devices.');
 }
 
 function notice(message) {
@@ -371,10 +448,12 @@ function render() {
         state.follows = state.follows.filter(item => item.url !== show.url);
         delete state.episodeActivity[show.url];
         feedCheckAfter.delete(show.url);
+        sync.record('follow', show.url, null, true);
       } else {
         const { episodes, ...details } = show;
         state.follows.push(details);
         markShowOpened(show);
+        sync.record('follow', show.url, details, true);
       }
       save(); render();
     }, following ? 'outline' : 'primary'));
@@ -406,7 +485,10 @@ async function request(endpoint, url) {
   if (native) return android('fetch', { url });
   const response = await fetch(endpoint);
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'The source is unavailable.');
+  if (!response.ok) {
+    if (response.status === 401) sync.session();
+    throw new Error(data.error || 'The source is unavailable.');
+  }
   return data;
 }
 
@@ -537,7 +619,12 @@ async function removeDownload(episode) {
 
 function checkpoint(force = false) {
   if (!state.current || activeKey !== state.current.key || (!force && Date.now() - lastCheckpoint < 3500)) return;
-  state.progress[state.current.key] = position;
+  const key = state.current.key;
+  const observed = observedPositions.get(key);
+  if (observed !== undefined && Math.abs(observed - position) < (force ? 0.1 : 0.75)) return;
+  observedPositions.set(key, position);
+  state.progress[key] = position;
+  if (!native) sync.record('progress', key, position, force);
   lastCheckpoint = Date.now();
   save();
 }
@@ -567,13 +654,23 @@ async function start(episode, fromQueue = false) {
   busy = true;
   try {
     if (!fromQueue && episode.key === activeKey) {
-      if (native) await android('toggle');
-      else if (audio.paused) await audio.play();
+      const resume = state.progress[episode.key];
+      const syncResume = !playing && resume !== undefined && Math.abs(resume - position) > 1 ? resume : undefined;
+      if (native) await android('toggle', { resume: syncResume, resumeAt: sync.data.progressAt[episode.key] });
+      else if (audio.paused) {
+        if (syncResume !== undefined) {
+          observedPositions.set(episode.key, syncResume);
+          audio.currentTime = syncResume;
+        }
+        await audio.play();
+      }
       else audio.pause();
     } else {
       checkpoint(true);
       if (native) {
-        await android('load', { ...episode, rate: state.rate });
+        await android('load', {
+          ...episode, rate: state.rate, resume: state.progress[episode.key], resumeAt: sync.data.progressAt[episode.key]
+        });
         state.current = episode;
         activeKey = episode.key;
       } else {
@@ -582,6 +679,7 @@ async function start(episode, fromQueue = false) {
         audio.src = episode.audio;
         audio.playbackRate = state.rate;
         const resume = state.progress[episode.key] ?? 0;
+        observedPositions.set(episode.key, resume);
         if (resume > 0) audio.currentTime = resume;
         if ('mediaSession' in navigator && 'MediaMetadata' in window) {
           const cover = episode.artwork || coverUrls.get(episode.feed);
@@ -627,6 +725,7 @@ async function seek(value) {
     else audio.currentTime = target;
     position = target;
     checkpoint(true); player();
+    if (native) sync.schedule(500);
   } catch (error) { notice(error.message); }
 }
 
@@ -645,7 +744,7 @@ if (audio) {
   audio.addEventListener('error', () => notice('This episode could not be played. Check your connection and try another episode.'));
   if ('mediaSession' in navigator) {
     for (const [action, callback] of Object.entries({
-      play: () => audio.play().catch(error => notice(error.message)), pause: () => audio.pause(),
+      play: () => { if (state.current && audio.paused) start(state.current); }, pause: () => audio.pause(),
       seekbackward: () => seek(position - 15), seekforward: () => seek(position + 30),
       seekto: details => seek(details.seekTime)
     })) {
@@ -660,6 +759,7 @@ if (audio) {
     try {
       const status = await android('status');
       if (!busy && status.key === state.current?.key) {
+        const wasPlaying = playing;
         activeKey = status.key;
         position = status.position; duration = status.duration; playing = status.playing;
         if (status.error && status.error !== state.playbackError) notice(status.error);
@@ -667,6 +767,7 @@ if (audio) {
         if (playing) endedKey = '';
         if (status.ended) await advance();
         else checkpoint();
+        if (wasPlaying && !playing) sync.schedule(500);
         player();
       }
     } catch { /* Controller may still be connecting. */ }
@@ -694,6 +795,26 @@ for (const tab of document.querySelectorAll('[data-page]')) {
   tab.addEventListener('click', () => navigate({ page: tab.dataset.page }));
 }
 $('#app-back').onclick = goBack;
+$('#open-sync').onclick = () => { paintSync(); $('#sync-dialog').showModal(); sync.session(); };
+$('#close-sync').onclick = () => $('#sync-dialog').close();
+$('#sync-form').onsubmit = async event => {
+  event.preventDefault();
+  const input = $('#sync-password');
+  const submit = $('#sign-in');
+  submit.disabled = true;
+  try {
+    await sync.login(input.value);
+    input.value = '';
+  } catch (error) { $('#sync-status').textContent = error.message; }
+  finally { submit.disabled = false; }
+};
+$('#sync-now').onclick = () => sync.run();
+$('#sign-out').onclick = async () => {
+  $('#sign-out').disabled = true;
+  try { await sync.logout(); }
+  catch (error) { $('#sync-status').textContent = error.message; }
+  finally { $('#sign-out').disabled = false; }
+};
 $('#add-feed').onclick = () => $('#feed-dialog').showModal();
 $('#cancel-feed').onclick = () => $('#feed-dialog').close();
 $('#feed-form').onsubmit = event => {
@@ -715,7 +836,9 @@ $('#rate').onchange = async event => {
     else if (audio) audio.playbackRate = state.rate;
   } catch (error) { notice(error.message); }
 };
-window.addEventListener('pagehide', () => checkpoint(true));
+window.addEventListener('pagehide', () => {
+  if (playing) checkpoint(true);
+});
 window.addEventListener('popstate', event => showRoute(event.state?.onionPod ?? initialRoute));
 if (!history.state?.onionPod) history.replaceState({ onionPod: initialRoute }, '');
 showRoute(history.state.onionPod);
@@ -724,3 +847,10 @@ refreshFollowedFeeds();
 setInterval(refreshFollowedFeeds, feedCheckInterval);
 document.addEventListener('visibilitychange', refreshFollowedFeeds);
 window.addEventListener('online', refreshFollowedFeeds);
+sync.session();
+setInterval(() => sync.schedule(), 15_000);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && playing) checkpoint(true);
+  else if (!document.hidden) sync.schedule();
+});
+window.addEventListener('online', () => sync.session());
