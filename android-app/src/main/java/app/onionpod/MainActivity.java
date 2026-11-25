@@ -29,6 +29,7 @@ import androidx.webkit.JavaScriptReplyProxy;
 import androidx.webkit.ServiceWorkerClientCompat;
 import androidx.webkit.ServiceWorkerControllerCompat;
 import com.google.common.util.concurrent.ListenableFuture;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -161,6 +162,15 @@ public final class MainActivity extends ComponentActivity {
         JSONObject data = request.getJSONObject("data");
         if (action.startsWith("sync-")) return syncTransport.request(action.substring(5), data);
         if (action.equals("local-progress")) return PlaybackProgress.pending(this);
+        if (action.equals("played-episodes")) {
+            JSONArray keys = data.getJSONArray("keys");
+            JSONArray played = new JSONArray();
+            for (int index = 0; index < keys.length(); index++) {
+                String key = keys.getString(index);
+                if (PlaybackProgress.time(this, key) > 0) played.put(key);
+            }
+            return played;
+        }
         if (action.equals("local-progress-ack")) {
             PlaybackProgress.acknowledge(this, data.getJSONArray("events"));
             return true;
@@ -191,6 +201,7 @@ public final class MainActivity extends ComponentActivity {
                     .put("at", active == null ? 0 : PlaybackProgress.time(this, active.mediaId))
                     .put("duration", player.getDuration() == C.TIME_UNSET ? 0 : player.getDuration() / 1000.0)
                     .put("position", player.getCurrentPosition() / 1000.0)
+                    .put("started", player.isPlaying())
                     .put("playing", player.getPlayWhenReady() && player.getPlaybackState() != Player.STATE_ENDED && player.getPlayerError() == null)
                     .put("ended", player.getPlaybackState() == Player.STATE_ENDED)
                     .put("error", player.getPlayerError() == null ? "" : "This episode could not be played.");

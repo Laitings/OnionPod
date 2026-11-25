@@ -33,6 +33,8 @@ Open **Sync** on the web and Android and sign in with the same password. The fir
 
 **Continue Listening** on Discover resumes your most recent unfinished episode. With sync enabled, it includes playback from the other device. Existing listening positions are kept when the server adds episode metadata to its database.
 
+**Inbox** shows new episodes from followed podcasts, newest first. The first feed check establishes a baseline. Play or dismiss an episode to clear it from this device’s inbox. Opening the podcast clears its badge and keeps the episode in the inbox.
+
 Before making the site reachable from mobile data, verify that a signed-out request to `/api/search?q=podcast` and `/api/feed?url=https://example.com/feed.xml` receives HTTP 401 from OnionPod on an allowed network. In private staging, test follow and unfollow in both directions, then pause an episode on Android and resume it on the web. Verify Movie Tracker still works. Repeat the phone test over mobile data after the NAS access profile is deliberately opened.
 
 ## Android

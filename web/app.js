@@ -1,4 +1,4 @@
-import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, httpsUrl, parseFeed, readArtwork, readEpisodeIds, episodeActivity, enqueue, episodeFeed, recentProgress, resumeEpisode, time } from './model.js';
+import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, resumeEpisode, time } from './model.js';
 import { createSync } from './sync.js';
 
 const $ = selector => document.querySelector(selector);
@@ -11,6 +11,7 @@ const state = {
   follows: saved.follows ?? [], queue: saved.queue ?? [], progress: saved.progress ?? {},
   episodeDetails: saved.episodeDetails ?? {}, nativeProgressAt: saved.nativeProgressAt ?? {},
   episodeActivity: saved.episodeActivity ?? {},
+  inbox: saved.inbox ?? [],
   downloads: saved.downloads ?? [], current: saved.current ?? null, rate: saved.rate ?? 1,
   openEpisodeNotes: new Set(),
   page: 'discover', show: null, query: '', results: null, message: '', loading: false
@@ -43,7 +44,7 @@ const searchCache = new Map();
 const initialRoute = { page: 'discover', depth: 0 };
 const tabs = {
   discover: 'Discover', categories: 'Categories', category: 'Categories', show: 'Podcast',
-  library: 'Library', queue: 'Queue', downloads: 'Downloads'
+  library: 'Library', inbox: 'Inbox', queue: 'Queue', downloads: 'Downloads'
 };
 const coverUrls = new Map(catalog.map(show => [show.url, show.artwork]));
 const coverJobs = new Map();
@@ -99,9 +100,9 @@ function android(action, data = {}) {
 }
 
 function save() {
-  const { follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt } = state;
+  const { follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox } = state;
   try {
-    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt, syncState: sync.data }));
+    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, syncState: sync.data }));
     return true;
   } catch {
     notice('OnionPod could not save changes on this device.');
@@ -137,6 +138,7 @@ function applySync(changes) {
         state.follows = state.follows.filter(show => show.url !== key);
         delete state.episodeActivity[key];
         feedCheckAfter.delete(key);
+        state.inbox = state.inbox.filter(episode => episode.feed !== key);
         libraryChanged = true;
       } else if (value && !existing) {
         state.follows.push(value);
@@ -289,6 +291,7 @@ function toggleFollow(show) {
     state.follows = state.follows.filter(item => item.url !== url);
     delete state.episodeActivity[url];
     feedCheckAfter.delete(url);
+    state.inbox = state.inbox.filter(episode => episode.feed !== url);
     sync.record('follow', url, null, true);
   } else {
     const { episodes, notesFor, ...details } = show;
@@ -384,7 +387,8 @@ function showRoute(route) {
     if (route.page === 'discover') { state.query = ''; state.results = null; }
     render();
   }
-  if (route.page === 'library') refreshFollowedFeeds();
+  if (route.page === 'library' || route.page === 'inbox') refreshFollowedFeeds();
+  if (route.page === 'inbox') refreshInboxPlayback();
   if (route.page === 'discover' && !route.query) refreshExplore();
   window.scrollTo(0, 0);
 }
@@ -481,6 +485,7 @@ function insertList(target, episodes, context) {
   if (!episodes.length) {
     target.append(el('p', 'empty', {
       feed: 'No playable HTTPS audio episodes were found in this feed.',
+      inbox: state.follows.length ? 'You’re caught up. New releases from the shows you follow will appear here.' : 'Follow a podcast to get its new episodes here.',
       queue: 'Your queue is empty. Add an episode to line up what plays next.',
       downloads: 'Your downloads will appear here.'
     }[context]));
@@ -497,8 +502,18 @@ function insertList(target, episodes, context) {
     if (context === 'downloads') meta.push({ pending: 'Downloading', ready: 'Available offline', failed: 'Download failed' }[episode.downloadState] ?? 'Checking download');
     info.append(el('strong', '', episode.title), el('small', '', meta.filter(Boolean).join(' · ')));
     const actions = el('div', 'actions');
-    actions.append(button(state.current?.key === episode.key ? 'Play / pause' : 'Play', () => start(episode)));
-    if (context === 'queue') {
+    const play = button(state.current?.key === episode.key ? 'Play / pause' : 'Play', () => start(episode));
+    actions.append(play);
+    if (context === 'inbox') {
+      play.setAttribute('aria-label', 'Play ' + episode.title);
+      const dismiss = button('Dismiss', () => {
+        removeInboxEpisodes([episode.key]);
+        const controls = document.querySelectorAll('.inbox-dismiss');
+        (controls[Math.min(index, controls.length - 1)] ?? $('[data-page=inbox]')).focus();
+      }, 'outline inbox-dismiss');
+      dismiss.setAttribute('aria-label', 'Dismiss ' + episode.title);
+      actions.append(dismiss);
+    } else if (context === 'queue') {
       const up = button('Move up', () => editQueue('move-up', episode, index));
       up.disabled = index === 0;
       actions.append(up, button('Remove', () => editQueue('remove', episode)));
@@ -507,7 +522,7 @@ function insertList(target, episodes, context) {
       add.disabled = state.queue.some(item => item.key === episode.key);
       actions.append(add);
     }
-    if (native) {
+    if (native && context !== 'inbox') {
       const downloaded = state.downloads.find(item => item.key === episode.key);
       if (context === 'downloads') {
         if (episode.downloadState === 'failed') actions.append(button('Retry', () => download(episode)));
@@ -650,8 +665,9 @@ function render() {
       content.append(more);
     }
   } else {
-    content.append(el('h1', '', { library: 'Your library', queue: 'Up next', downloads: 'Downloads' }[page]));
+    content.append(el('h1', '', { library: 'Your library', inbox: 'New Episodes', queue: 'Up next', downloads: 'Downloads' }[page]));
     if (page === 'library') content.append(state.follows.length ? grid(state.follows) : el('p', 'empty', 'Follow a podcast to find it here.'));
+    else if (page === 'inbox') insertList(content, inboxNewestFirst(state.inbox), 'inbox');
     else insertList(content, page === 'queue' ? state.queue : state.downloads, page);
   }
   updateEpisodeBadges();
@@ -721,12 +737,37 @@ async function refreshExplore() {
   }
 }
 
+function observeFollowedEpisodes(url, episodes, opened = false) {
+  const previous = state.episodeActivity[url];
+  const { activity, added } = episodeInboxUpdate(previous, episodes, opened);
+  state.episodeActivity[url] = activity;
+  const discoveredAt = Date.now();
+  for (const episode of added) {
+    if (state.progress[episode.key] > 0 || (playing && activeKey === episode.key)) continue;
+    state.inbox.push({ ...episode, discoveredAt });
+  }
+  return activity !== previous;
+}
+
+function removeInboxEpisodes(keys) {
+  const remaining = state.inbox.filter(episode => !keys.includes(episode.key));
+  if (remaining.length === state.inbox.length) return;
+  state.inbox = remaining;
+  save();
+  if (state.page === 'inbox') render();
+}
+
+async function refreshInboxPlayback() {
+  if (!native || !state.inbox.length) return;
+  try {
+    const played = await android('played-episodes', { keys: state.inbox.map(episode => episode.key) });
+    removeInboxEpisodes(played);
+  } catch { /* The next playback check can retry. */ }
+}
+
 function markShowOpened(show) {
-  const previous = state.episodeActivity[show.url];
-  const next = episodeActivity(previous, show.episodes.map(episode => episode.id), true);
-  state.episodeActivity[show.url] = next;
   feedCheckAfter.set(show.url, Date.now() + feedCheckInterval);
-  return next !== previous;
+  return observeFollowedEpisodes(show.url, show.episodes, true);
 }
 
 async function refreshFollowedFeeds() {
@@ -734,6 +775,7 @@ async function refreshFollowedFeeds() {
   const due = state.follows.filter(show => (feedCheckAfter.get(show.url) ?? 0) <= Date.now());
   if (!due.length) return;
   checkingFollows = true;
+  let inboxChanged = false;
   async function refresh() {
     while (due.length && !document.hidden) {
       const follow = due.shift();
@@ -744,9 +786,9 @@ async function refreshFollowedFeeds() {
       try {
         const data = await requestSource(url);
         if (!state.follows.includes(follow) || state.episodeActivity[url] !== previous) continue;
-        const next = episodeActivity(previous, readEpisodeIds(data.body, data.url));
-        if (next !== previous) {
-          state.episodeActivity[url] = next;
+        const length = state.inbox.length;
+        if (observeFollowedEpisodes(url, readFeedEpisodes(data.body, data.url, url))) {
+          inboxChanged ||= state.inbox.length !== length;
           save();
           updateEpisodeBadges();
         }
@@ -756,6 +798,10 @@ async function refreshFollowedFeeds() {
   try { await Promise.all(Array.from({ length: Math.min(3, due.length) }, refresh)); }
   finally {
     checkingFollows = false;
+    if (state.page === 'inbox' && inboxChanged) {
+      render();
+      refreshInboxPlayback();
+    }
     refreshFollowedFeeds();
   }
 }
@@ -968,6 +1014,7 @@ if (audio) {
     });
   }
   audio.addEventListener('ended', advance);
+  audio.addEventListener('playing', () => removeInboxEpisodes([activeKey]));
   audio.addEventListener('error', () => notice('This episode could not be played. Check your connection and try another episode.'));
   if ('mediaSession' in navigator) {
     for (const [action, callback] of Object.entries({
@@ -1004,6 +1051,7 @@ if (audio) {
         if (status.error && status.error !== state.playbackError) notice(status.error);
         state.playbackError = status.error;
         checkpoint(status.ended);
+        if (status.started) removeInboxEpisodes([status.key]);
         if (wasPlaying && !playing) sync.schedule(500);
         player();
       }
@@ -1086,6 +1134,9 @@ refreshFollowedFeeds();
 setInterval(refreshFollowedFeeds, feedCheckInterval);
 setInterval(refreshExplore, exploreMaxAge);
 document.addEventListener('visibilitychange', refreshFollowedFeeds);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.page === 'inbox') refreshInboxPlayback();
+});
 window.addEventListener('online', refreshFollowedFeeds);
 sync.session();
 setInterval(() => sync.schedule(), 15_000);

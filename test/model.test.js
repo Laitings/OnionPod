@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chartIds, directoryShows, enqueue, episodeActivity, httpsUrl, podcastCategory, rankedShows, recentProgress, resumeEpisode, time } from '../web/model.js';
+import { chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, httpsUrl, inboxNewestFirst, podcastCategory, rankedShows, recentProgress, resumeEpisode, time } from '../web/model.js';
 import { feedAddress, publicAddress, serve } from '../server.mjs';
 
 test('Continue Listening chooses the latest unfinished episode across local and synced progress', () => {
@@ -44,6 +44,30 @@ test('new episodes accumulate once and stay unread until the show opens', () => 
   assert.equal(opened.unread, 0);
   assert.equal(episodeActivity(opened, ['just-published', 'older']), opened);
   assert.equal(episodeActivity(opened, ['next-release', 'just-published']).unread, 1);
+});
+
+test('the inbox baselines followed feeds and adds each release once even when the show opens', () => {
+  const old = { id: 'old' };
+  const release = { id: 'release' };
+  const initial = episodeInboxUpdate(undefined, [old]);
+  assert.deepEqual(initial.added, []);
+
+  const opened = episodeInboxUpdate(initial.activity, [release, old], true);
+  assert.equal(opened.activity.unread, 0);
+  assert.deepEqual(opened.added, [release]);
+  assert.deepEqual(episodeInboxUpdate(opened.activity, [release, old]).added, []);
+});
+
+test('the inbox imports previously unread releases once and orders episodes by date', () => {
+  const old = { id: 'old', date: '2026-08-10' };
+  const release = { id: 'release', date: '2026-08-12' };
+  const undated = { id: 'undated', date: '', discoveredAt: Date.parse('2026-08-11') };
+  const legacy = { known: ['old', 'release'], unread: 1 };
+  const upgraded = episodeInboxUpdate(legacy, [release, old]);
+  assert.equal(upgraded.activity.unread, 1);
+  assert.deepEqual(upgraded.added, [release]);
+  assert.deepEqual(episodeInboxUpdate(upgraded.activity, [release, old]).added, []);
+  assert.deepEqual(inboxNewestFirst([old, release, undated]), [release, undated, old]);
 });
 
 test('category results retain chart order and skip missing or insecure feed URLs', () => {

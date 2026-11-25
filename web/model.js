@@ -162,8 +162,18 @@ function* playableEntries(channel, base) {
   }
 }
 
-export function readEpisodeIds(xml, base, DOM = globalThis.DOMParser) {
-  return Array.from(playableEntries(readChannel(xml, DOM), base), ({ id }) => id);
+function feedEpisode({ id, item, audio }, feed, show, artwork) {
+  return {
+    key: JSON.stringify([feed, id]), id, audio, title: text(item, 'title') || 'Untitled episode',
+    feed, show, artwork, date: text(item, 'pubDate') || text(item, 'published') || text(item, 'updated')
+  };
+}
+
+export function readFeedEpisodes(xml, base, original, DOM = globalThis.DOMParser) {
+  const channel = readChannel(xml, DOM);
+  const title = text(channel, 'title') || 'Untitled podcast';
+  const artwork = channelArtwork(channel, base);
+  return Array.from(playableEntries(channel, base), entry => feedEpisode(entry, original, title, artwork));
 }
 
 export function episodeActivity(previous, ids, opened = false) {
@@ -178,20 +188,36 @@ export function episodeActivity(previous, ids, opened = false) {
   return { known: [...known], unread };
 }
 
+export function episodeInboxUpdate(previous, episodes, opened = false) {
+  const activity = episodeActivity(previous, episodes.map(episode => episode.id), opened);
+  if (!previous) return { activity: { ...activity, inboxReady: true }, added: [] };
+  const known = new Set(previous.known);
+  // Older versions appended unread IDs to the end of the known list.
+  const legacyUnread = new Set(!previous.inboxReady && previous.unread ? previous.known.slice(-previous.unread) : []);
+  const added = episodes.filter(episode => !known.has(episode.id) || legacyUnread.has(episode.id));
+  return {
+    activity: activity === previous && previous.inboxReady ? previous : { ...activity, inboxReady: true }, added
+  };
+}
+
+export function inboxNewestFirst(episodes) {
+  const byDate = episode => {
+    const published = Date.parse(episode.date);
+    return Number.isNaN(published) ? episode.discoveredAt : published;
+  };
+  return [...episodes].sort((a, b) => byDate(b) - byDate(a));
+}
+
 export function parseFeed(xml, base, original, DOM = globalThis.DOMParser) {
   const channel = readChannel(xml, DOM);
   const title = text(channel, 'title') || 'Untitled podcast';
   const artwork = channelArtwork(channel, base);
   const episodeNotes = new Map();
-  const episodes = Array.from(playableEntries(channel, base), ({ id, item, audio }) => {
-    const key = JSON.stringify([original, id]);
-    const fields = [...descriptionFields(item, ['encoded', 'description', 'summary', 'content', 'subtitle'])];
-    if (fields.length) episodeNotes.set(key, fields);
-    return {
-      key, id, audio, title: text(item, 'title') || 'Untitled episode',
-      feed: original, show: title, artwork,
-      date: text(item, 'pubDate') || text(item, 'published') || text(item, 'updated')
-    };
+  const episodes = Array.from(playableEntries(channel, base), entry => {
+    const episode = feedEpisode(entry, original, title, artwork);
+    const fields = [...descriptionFields(entry.item, ['encoded', 'description', 'summary', 'content', 'subtitle'])];
+    if (fields.length) episodeNotes.set(episode.key, fields);
+    return episode;
   });
   return {
     url: original, title, artwork, description: firstDescription(descriptionFields(channel, ['description', 'summary', 'subtitle'])),
