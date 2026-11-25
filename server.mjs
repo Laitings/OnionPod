@@ -186,9 +186,10 @@ export function serve({ syncStore, publicOrigin, allowGuestRelay = !syncStore } 
       active++;
       try {
         const term = (url.searchParams.get('q') ?? '').trim().slice(0, 120);
+        const limit = Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get('limit') ?? '18', 10) || 18));
         const target = url.pathname === '/api/feed'
           ? feedAddress(url.searchParams.get('url'))
-          : new URL('https://itunes.apple.com/search?' + new URLSearchParams({ term, media: 'podcast', limit: '18' }));
+          : new URL('https://itunes.apple.com/search?' + new URLSearchParams({ term, media: 'podcast', limit: String(limit) }));
         const data = await fetchText(target, AbortSignal.timeout(12000));
         return json(200, data);
       } catch (error) {

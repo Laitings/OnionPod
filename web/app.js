@@ -38,6 +38,8 @@ const feedCheckAfter = new Map();
 const feedCheckInterval = 5 * 60_000;
 let checkingFollows = false;
 const chartCache = new Map();
+const categoryPageSize = 25;
+let loadingMoreCategory = false;
 const exploreKey = 'onionpod-explore-v2';
 const exploreMaxAge = 60 * 60_000;
 let explore = readExploreCache();
@@ -704,8 +706,16 @@ function render() {
       const heading = el('div', 'section-head');
       heading.append(el('h2', '', category.queries ? 'Popular podcasts' : 'Top podcasts'),
         el('small', '', category.queries ? 'Apple Podcasts · Topic' : 'Apple Podcasts · US'));
-      const shows = chartCache.get(category.id) ?? [];
+      const cached = chartCache.get(category.id);
+      const shows = cached ? (cached.ids ? cached.shows : cached.shows.slice(0, cached.visible)) : [];
+      const hasMore = cached ? (cached.ids ? cached.loaded < cached.ids.length : cached.visible < cached.shows.length) : false;
       content.append(heading, shows.length ? grid(shows) : el('p', 'empty', 'No public HTTPS feeds are available in this category right now.'));
+      if (hasMore) {
+        const more = button(loadingMoreCategory ? 'Loading more…' : 'Show more podcasts', () => loadMoreCategory(category));
+        more.classList.add('more');
+        more.disabled = loadingMoreCategory;
+        content.append(more);
+      }
     }
   } else if (page === 'show') {
     content.append(button(state.backLabel, goBack, 'back'));
@@ -791,14 +801,25 @@ function paintExplore() {
   updateEpisodeBadges();
 }
 
-async function chartShows(categoryId) {
-  const genre = categoryId ? '/genre=' + categoryId : '';
-  const chart = await requestSource('https://itunes.apple.com/us/rss/toppodcasts/limit=25' + genre + '/json');
-  const ids = chartIds(JSON.parse(chart.body));
+async function lookupShows(ids) {
   if (!ids.length) return [];
   const query = new URLSearchParams({ id: ids.join(','), entity: 'podcast', country: 'US' });
   const details = await requestSource('https://itunes.apple.com/lookup?' + query);
   return rankedShows(ids, JSON.parse(details.body).results ?? []);
+}
+
+async function chartShows(categoryId) {
+  const genre = categoryId ? '/genre=' + categoryId : '';
+  const chart = await requestSource('https://itunes.apple.com/us/rss/toppodcasts/limit=25' + genre + '/json');
+  return lookupShows(chartIds(JSON.parse(chart.body)));
+}
+
+async function chartCategoryPage(categoryId) {
+  const chart = await requestSource('https://itunes.apple.com/us/rss/toppodcasts/limit=200/genre=' + categoryId + '/json');
+  const ids = chartIds(JSON.parse(chart.body), 200);
+  const batch = ids.slice(0, categoryPageSize);
+  const shows = await lookupShows(batch);
+  return { ids, shows, loaded: batch.length };
 }
 
 async function refreshExplore() {
@@ -889,29 +910,59 @@ async function refreshFollowedFeeds() {
   }
 }
 
-async function searchDirectory(query) {
-  const params = new URLSearchParams({ term: query, media: 'podcast', limit: '18' });
-  const { body } = await request('/api/search?q=' + encodeURIComponent(query), 'https://itunes.apple.com/search?' + params);
+async function searchDirectory(query, limit = 18) {
+  const params = new URLSearchParams({ term: query, media: 'podcast', limit: String(limit) });
+  const endpoint = '/api/search?q=' + encodeURIComponent(query) + (limit !== 18 ? '&limit=' + limit : '');
+  const { body } = await request(endpoint, 'https://itunes.apple.com/search?' + params);
   return directoryShows(JSON.parse(body).results ?? []);
 }
 
 async function topicShows(queries) {
-  const lists = await Promise.all(queries.map(searchDirectory));
-  return mergeShows(lists);
+  const lists = await Promise.all(queries.map(query => searchDirectory(query, 100)));
+  return { shows: mergeShows(lists, 200), visible: categoryPageSize };
 }
 
 async function loadCategory(category, version) {
   state.category = category;
   state.message = '';
+  loadingMoreCategory = false;
   state.loading = !chartCache.has(category.id);
   render();
   if (!state.loading) return;
   try {
-    chartCache.set(category.id, category.queries ? await topicShows(category.queries) : await chartShows(category.id));
+    chartCache.set(category.id, category.queries ? await topicShows(category.queries) : await chartCategoryPage(category.id));
   } catch {
     if (version === generation) state.message = 'This category could not load. Try again in a moment.';
   } finally {
     if (version === generation) { state.loading = false; render(); }
+  }
+}
+
+async function loadMoreCategory(category) {
+  const cached = chartCache.get(category.id);
+  if (!cached || loadingMoreCategory) return;
+  if (!cached.ids) {
+    cached.visible = Math.min(cached.shows.length, cached.visible + categoryPageSize);
+    render();
+    return;
+  }
+  if (cached.loaded >= cached.ids.length) return;
+  const version = generation;
+  loadingMoreCategory = true;
+  render();
+  try {
+    const batch = cached.ids.slice(cached.loaded, cached.loaded + categoryPageSize);
+    const next = await lookupShows(batch);
+    const seen = new Set(cached.shows.map(show => show.url));
+    for (const show of next) {
+      if (!seen.has(show.url)) { seen.add(show.url); cached.shows.push(show); }
+    }
+    cached.loaded += batch.length;
+  } catch {
+    if (version === generation) notice('Could not load more podcasts. Try again in a moment.');
+  } finally {
+    loadingMoreCategory = false;
+    if (version === generation && state.page === 'category' && state.category?.id === category.id) render();
   }
 }
 

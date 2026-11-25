@@ -65,11 +65,11 @@ export function directoryShows(results) {
   });
 }
 
-export function chartIds(chart) {
+export function chartIds(chart, limit = 25) {
   const entries = chart.feed?.entry ?? [];
   if (!Array.isArray(entries)) return [];
   return [...new Set(entries.map(item => item?.id?.attributes?.['im:id'])
-    .filter(id => typeof id === 'string' && /^[0-9]{1,16}$/.test(id)))].slice(0, 25);
+    .filter(id => typeof id === 'string' && /^[0-9]{1,16}$/.test(id)))].slice(0, limit);
 }
 
 export function rankedShows(ids, results) {

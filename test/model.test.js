@@ -118,6 +118,9 @@ test('category results retain chart order and skip missing or insecure feed URLs
   const entries = ['4', '2', '7', '3', '2', 'invalid'].map(id => ({ id: { attributes: { 'im:id': id } } }));
   const ids = chartIds({ feed: { entry: entries } });
   assert.deepEqual(ids, ['4', '2', '7', '3']);
+  const many = Array.from({ length: 40 }, (_, i) => ({ id: { attributes: { 'im:id': String(i + 1) } } }));
+  assert.equal(chartIds({ feed: { entry: many } }).length, 25);
+  assert.equal(chartIds({ feed: { entry: many } }, 200).length, 40);
   const results = [
     { collectionId: 2, collectionName: 'Second', feedUrl: 'https://example.com/second.xml' },
     { collectionId: 3, collectionName: 'Insecure', feedUrl: 'http://example.com/feed.xml' },
