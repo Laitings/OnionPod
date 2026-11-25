@@ -45,10 +45,16 @@
         <span id="elapsed">0:00</span><input id="seek" aria-label="Playback position" type="range" step="1" value="0"><span id="duration">0:00</span>
       </div>
     </div>
-    <label class="speed"><span class="sr-only">Playback speed</span><select id="rate" aria-label="Playback speed">
-      <option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option>
-      <option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>
-    </select></label>
+    <div class="player-tools">
+      <div id="volume-control" class="volume">
+        <button id="mute" type="button" aria-label="Mute" aria-pressed="false" title="Mute">🔊</button>
+        <input id="volume" aria-label="Volume" type="range" min="0" max="1" step="0.01" value="1">
+      </div>
+      <label class="speed"><span class="sr-only">Playback speed</span><select id="rate" aria-label="Playback speed">
+        <option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option>
+        <option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>
+      </select></label>
+    </div>
   </footer>
   <dialog id="feed-dialog">
     <form id="feed-form">

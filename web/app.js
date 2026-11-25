@@ -14,6 +14,8 @@ const state = {
   inbox: saved.inbox ?? [],
   favorites: saved.favorites ?? [],
   downloads: saved.downloads ?? [], current: saved.current ?? null, rate: saved.rate ?? 1,
+  volume: Number.isFinite(saved.volume) ? Math.max(0, Math.min(1, saved.volume)) : 1,
+  muted: Boolean(saved.muted),
   openEpisodeNotes: new Set(),
   page: 'discover', show: null, query: '', results: null, message: '', loading: false
 };
@@ -82,6 +84,7 @@ const coverObserver = new IntersectionObserver(entries => {
 
 if (native) {
   $('[data-page=downloads]').hidden = false;
+  $('#volume-control').hidden = true;
   native.onmessage = event => {
     const { id, value, error } = JSON.parse(event.data);
     const pending = waiting.get(id);
@@ -105,9 +108,9 @@ function android(action, data = {}) {
 }
 
 function save() {
-  const { follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites } = state;
+  const { follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites } = state;
   try {
-    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, syncState: sync.data }));
+    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, syncState: sync.data }));
     return true;
   } catch {
     notice('OnionPod could not save changes on this device.');
@@ -1292,6 +1295,56 @@ $('#toggle').onclick = () => { if (state.current) start(state.current); };
 $('#rewind').onclick = () => seek(position - 15);
 $('#forward').onclick = () => seek(position + 30);
 $('#seek').onchange = event => seek(Number(event.target.value));
+function applyVolume(persist = false) {
+  const level = Math.max(0, Math.min(1, Math.round(state.volume * 100) / 100));
+  state.volume = level;
+  const silent = state.muted || level === 0;
+  if (audio) {
+    audio.volume = level;
+    audio.muted = state.muted;
+  }
+  const slider = $('#volume');
+  const muteButton = $('#mute');
+  if (slider) {
+    slider.value = String(silent ? 0 : level);
+    slider.setAttribute('aria-valuetext', silent ? 'Muted' : Math.round(level * 100) + '%');
+  }
+  if (muteButton) {
+    muteButton.textContent = silent ? '🔇' : level < 0.35 ? '🔈' : level < 0.7 ? '🔉' : '🔊';
+    muteButton.setAttribute('aria-label', silent ? 'Unmute' : 'Mute');
+    muteButton.setAttribute('aria-pressed', String(silent));
+    muteButton.title = silent ? 'Unmute' : 'Mute';
+  }
+  if (persist) save();
+}
+if (!native) {
+  applyVolume();
+  $('#volume').addEventListener('input', event => {
+    const next = Number(event.target.value);
+    state.volume = next;
+    state.muted = next === 0;
+    applyVolume(true);
+  });
+  $('#mute').addEventListener('click', () => {
+    if (state.muted || state.volume === 0) {
+      state.muted = false;
+      if (state.volume === 0) state.volume = 0.5;
+    } else {
+      state.muted = true;
+    }
+    applyVolume(true);
+  });
+  $('#volume-control').addEventListener('wheel', event => {
+    if (!event.deltaY) return;
+    event.preventDefault();
+    const step = event.deltaY < 0 ? 0.05 : -0.05;
+    const base = state.muted ? 0 : state.volume;
+    const next = Math.max(0, Math.min(1, Math.round((base + step) * 100) / 100));
+    state.volume = next;
+    state.muted = next === 0;
+    applyVolume(true);
+  }, { passive: false });
+}
 $('#rate').value = state.rate;
 $('#rate').onchange = async event => {
   state.rate = Number(event.target.value);

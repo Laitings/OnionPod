@@ -5,6 +5,7 @@ import android.content.ComponentName;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.graphics.Color;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
@@ -52,6 +53,7 @@ public final class MainActivity extends ComponentActivity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
         syncTransport = new SyncTransport(this);
         queue = new PlaybackQueue(this);
         WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
