@@ -28,6 +28,7 @@ import org.json.JSONObject;
 
 public final class PlaybackService extends MediaSessionService {
     static final SessionCommand LOAD_EPISODE = new SessionCommand("app.onionpod.LOAD_EPISODE", Bundle.EMPTY);
+    private static final long DISCONNECT_REWIND_MS = 5_000;
     private MediaSession session;
     private ExoPlayer player;
     private SyncTransport transport;
@@ -55,6 +56,11 @@ public final class PlaybackService extends MediaSessionService {
             .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), true);
         player.setHandleAudioBecomingNoisy(true);
         player.addListener(new Player.Listener() {
+            @Override public void onPlayWhenReadyChanged(boolean ready, int reason) {
+                if (!ready && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY) {
+                    rewindAfterDisconnect();
+                }
+            }
             @Override public void onIsPlayingChanged(boolean playing) {
                 saveProgress();
                 if (!playing) flushProgress();
@@ -101,6 +107,15 @@ public final class PlaybackService extends MediaSessionService {
             }
         }).build();
         handler.post(checkpoint);
+    }
+
+    private void rewindAfterDisconnect() {
+        MediaItem item = player.getCurrentMediaItem();
+        if (item == null || !player.isCurrentMediaItemSeekable() || player.getPlaybackState() == Player.STATE_ENDED) return;
+        long resumePosition = Math.max(0, player.getCurrentPosition() - DISCONNECT_REWIND_MS);
+        player.seekTo(resumePosition);
+        PlaybackProgress.save(this, item.mediaId, resumePosition, EpisodeMedia.from(item));
+        flushProgress();
     }
 
     private void saveProgress() {

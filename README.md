@@ -53,6 +53,8 @@ On macOS or Linux use `./gradlew` in place of `.\gradlew.bat`. The debug APK is 
 
 Android packages the shared interface locally and accesses feeds directly. Media3 runs playback in a service and exposes Android media controls. When an episode finishes, the service starts the next queued episode even if the app is in the background or the screen is locked. Downloaded episodes play from their local file. Download episodes from their episode lists and play completed downloads from the Downloads tab.
 
+When Android pauses playback after an audio output disconnects, OnionPod rewinds by five seconds so you hear that part again when you press Play. Alerts that temporarily take audio focus resume playback at the same position when the alert releases focus.
+
 ## Project layout
 
 - `web/` contains the shared HTML, CSS, and JavaScript. It has no framework or build step.
