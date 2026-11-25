@@ -1,7 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { enqueue, httpsUrl, time } from '../web/model.js';
+import { chartIds, enqueue, httpsUrl, rankedShows, time } from '../web/model.js';
 import { feedAddress, publicAddress, serve } from '../server.mjs';
+
+test('category results retain chart order and skip missing or insecure feed URLs', () => {
+  const entries = ['4', '2', '7', '3', '2', 'invalid'].map(id => ({ id: { attributes: { 'im:id': id } } }));
+  const ids = chartIds({ feed: { entry: entries } });
+  assert.deepEqual(ids, ['4', '2', '7', '3']);
+  const results = [
+    { collectionId: 2, collectionName: 'Second', feedUrl: 'https://example.com/second.xml' },
+    { collectionId: 3, collectionName: 'Insecure', feedUrl: 'http://example.com/feed.xml' },
+    { collectionId: 4, collectionName: 'First', feedUrl: 'https://example.com/first.xml' }
+  ];
+  assert.deepEqual(rankedShows(ids, results).map(show => show.title), ['First', 'Second']);
+});
 
 test('queue preserves order and ignores duplicate episode keys', () => {
   const first = { key: 'one' };

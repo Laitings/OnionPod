@@ -9,6 +9,43 @@ export const catalog = [
     artwork: 'https://image.simplecastcdn.com/images/2c9187d6-9dff-4257-bc55-469cf13afd48/60a2cfed-b8ca-460b-abb8-8ab0afb3fa8c/3000x3000/radiolab-showsquare-3000x3000.jpg' }
 ];
 
+export const categories = [
+  { id: 1301, title: 'Arts', mark: '✿' },
+  { id: 1321, title: 'Business', mark: '↗' },
+  { id: 1303, title: 'Comedy', mark: '☺' },
+  { id: 1304, title: 'Education', mark: '▤' },
+  { id: 1483, title: 'Fiction', mark: '✧' },
+  { id: 1487, title: 'History', mark: '◷' },
+  { id: 1489, title: 'News', mark: '▥' },
+  { id: 1533, title: 'Science', mark: '⊙' },
+  { id: 1324, title: 'Society & Culture', mark: '◎' },
+  { id: 1545, title: 'Sports', mark: '◉' },
+  { id: 1318, title: 'Technology', mark: '⌘' },
+  { id: 1488, title: 'True Crime', mark: '⌕' }
+];
+
+export function directoryShows(results) {
+  const seen = new Set();
+  return results.flatMap(item => {
+    const url = httpsUrl(item.feedUrl);
+    if (!url || seen.has(url)) return [];
+    seen.add(url);
+    return [{ url, title: item.collectionName || 'Untitled podcast', author: item.artistName, category: item.primaryGenreName }];
+  });
+}
+
+export function chartIds(chart) {
+  const entries = chart.feed?.entry ?? [];
+  if (!Array.isArray(entries)) return [];
+  return [...new Set(entries.map(item => item?.id?.attributes?.['im:id'])
+    .filter(id => typeof id === 'string' && /^[0-9]{1,16}$/.test(id)))].slice(0, 25);
+}
+
+export function rankedShows(ids, results) {
+  const byId = new Map(results.map(item => [String(item.collectionId ?? item.trackId), item]));
+  return directoryShows(ids.map(id => byId.get(id)).filter(Boolean));
+}
+
 export function httpsUrl(value, base) {
   if (!value?.trim()) return '';
   try {

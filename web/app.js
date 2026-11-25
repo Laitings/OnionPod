@@ -1,4 +1,4 @@
-import { catalog, httpsUrl, parseFeed, readArtwork, enqueue, time } from './model.js';
+import { catalog, categories, directoryShows, chartIds, rankedShows, httpsUrl, parseFeed, readArtwork, enqueue, time } from './model.js';
 
 const $ = selector => document.querySelector(selector);
 const native = window.OnionNative;
@@ -22,6 +22,11 @@ let noticeTimer;
 let nativeId = 0;
 let endedKey = '';
 const waiting = new Map();
+const chartCache = new Map();
+const tabs = {
+  discover: 'Discover', categories: 'Categories', category: 'Categories', show: 'Podcast',
+  library: 'Library', queue: 'Queue', downloads: 'Downloads'
+};
 const coverUrls = new Map(catalog.map(show => [show.url, show.artwork]));
 const coverJobs = new Map();
 let activeCoverJobs = 0;
@@ -214,13 +219,15 @@ function insertList(target, episodes, context) {
 
 function render() {
   const page = state.page;
+  const parent = page === 'show' ? state.returnPage : page;
+  const activeTab = parent === 'category' ? 'categories' : parent;
   for (const tab of document.querySelectorAll('[data-page]')) {
-    const selected = tab.dataset.page === (page === 'show' ? state.returnPage : page);
+    const selected = tab.dataset.page === activeTab;
     if (selected) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
   }
   $('#queue-count').textContent = state.queue.length || '';
-  $('#section-label').textContent = { discover: 'Discover', show: 'Podcast', library: 'Library', queue: 'Queue', downloads: 'Downloads' }[page];
+  $('#section-label').textContent = tabs[page];
   const content = $('#content');
   for (const panel of content.querySelectorAll('[data-artwork-feed]')) coverObserver.unobserve(panel);
   content.replaceChildren();
@@ -246,8 +253,36 @@ function render() {
     else if (state.results && !state.results.length) section.append(el('p', 'empty', 'No podcasts matched your search.'));
     else section.append(grid(state.results ?? catalog));
     content.append(section);
+  } else if (page === 'categories') {
+    const list = el('div', 'category-grid');
+    for (const category of categories) {
+      const card = button('', () => openCategory(category), 'category-card');
+      const mark = el('span', 'category-mark', category.mark);
+      mark.setAttribute('aria-hidden', 'true');
+      card.append(mark, el('strong', '', category.title));
+      list.append(card);
+    }
+    content.append(el('h1', '', 'Categories'), list);
+  } else if (page === 'category') {
+    const category = state.category;
+    content.append(button('Back to categories', () => go('categories'), 'back'), el('h1', '', category.title));
+    if (state.loading || state.message) {
+      const status = el('p', 'empty', state.message || 'Loading podcasts…');
+      status.setAttribute('role', 'status');
+      content.append(status);
+      if (state.message) content.append(button('Try again', () => openCategory(category)));
+    } else {
+      const heading = el('div', 'section-head');
+      heading.append(el('h2', '', 'Top podcasts'), el('small', '', 'Apple Podcasts · US'));
+      const shows = chartCache.get(category.id) ?? [];
+      content.append(heading, shows.length ? grid(shows) : el('p', 'empty', 'No public HTTPS feeds are available in this category right now.'));
+    }
   } else if (page === 'show') {
-    content.append(button('Back to ' + (state.returnPage === 'library' ? 'library' : 'discover'), () => go(state.returnPage), 'back'));
+    const back = state.returnPage === 'category' ? state.category.title : tabs[state.returnPage].toLowerCase();
+    content.append(button('Back to ' + back, () => {
+      if (state.returnPage === 'category') openCategory(state.category);
+      else go(state.returnPage);
+    }, 'back'));
     if (!state.show) {
       content.append(el('p', 'empty', state.message || 'Loading episodes…'));
       return;
@@ -291,6 +326,37 @@ async function request(endpoint, url) {
   return data;
 }
 
+function requestSource(url) {
+  return request('/api/feed?url=' + encodeURIComponent(url), url);
+}
+
+async function openCategory(category) {
+  const version = ++generation;
+  state.category = category;
+  state.page = 'category';
+  state.message = '';
+  state.loading = !chartCache.has(category.id);
+  render();
+  window.scrollTo(0, 0);
+  if (!state.loading) return;
+  try {
+    const chart = await requestSource('https://itunes.apple.com/us/rss/toppodcasts/limit=25/genre=' + category.id + '/json');
+    if (version !== generation) return;
+    const ids = chartIds(JSON.parse(chart.body));
+    let shows = [];
+    if (ids.length) {
+      const query = new URLSearchParams({ id: ids.join(','), entity: 'podcast', country: 'US' });
+      const details = await requestSource('https://itunes.apple.com/lookup?' + query);
+      shows = rankedShows(ids, JSON.parse(details.body).results ?? []);
+    }
+    chartCache.set(category.id, shows);
+  } catch {
+    if (version === generation) state.message = 'This category could not load. Try again in a moment.';
+  } finally {
+    if (version === generation) { state.loading = false; render(); }
+  }
+}
+
 async function search(query) {
   if (!query) return;
   const version = ++generation;
@@ -300,14 +366,7 @@ async function search(query) {
     const params = new URLSearchParams({ term: query, media: 'podcast', limit: '18' });
     const { body } = await request('/api/search?q=' + encodeURIComponent(query), 'https://itunes.apple.com/search?' + params);
     if (version !== generation) return;
-    const results = JSON.parse(body).results ?? [];
-    const seen = new Set();
-    state.results = results.flatMap(item => {
-      const url = httpsUrl(item.feedUrl);
-      if (!url || seen.has(url)) return [];
-      seen.add(url);
-      return [{ url, title: item.collectionName || 'Untitled podcast', author: item.artistName, category: item.primaryGenreName }];
-    });
+    state.results = directoryShows(JSON.parse(body).results ?? []);
   } catch (error) {
     if (version === generation) state.message = 'Search could not load. ' + error.message;
   } finally {
@@ -319,11 +378,11 @@ async function openFeed(value, hint = {}) {
   const url = httpsUrl(value);
   if (!url) { notice('Enter a valid HTTPS feed URL.'); return; }
   const version = ++generation;
-  state.returnPage = state.page === 'library' ? 'library' : 'discover';
+  if (state.page !== 'show') state.returnPage = state.page;
   state.page = 'show'; state.show = null; state.message = ''; state.episodeLimit = 50;
   render(); window.scrollTo(0, 0);
   try {
-    const data = await request('/api/feed?url=' + encodeURIComponent(url), url);
+    const data = await requestSource(url);
     const show = parseFeed(data.body, data.url, url);
     if (show.artwork) coverUrls.set(url, show.artwork);
     if (version === generation) state.show = { ...hint, ...show, artwork: show.artwork || hint.artwork, author: show.author || hint.author };
