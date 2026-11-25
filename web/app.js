@@ -1,4 +1,4 @@
-import { catalog, categories, directoryShows, chartIds, rankedShows, httpsUrl, parseFeed, readArtwork, readEpisodeIds, episodeActivity, enqueue, time } from './model.js';
+import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, httpsUrl, parseFeed, readArtwork, readEpisodeIds, episodeActivity, enqueue, time } from './model.js';
 import { createSync } from './sync.js';
 
 const $ = selector => document.querySelector(selector);
@@ -29,6 +29,11 @@ const feedCheckAfter = new Map();
 const feedCheckInterval = 5 * 60_000;
 let checkingFollows = false;
 const chartCache = new Map();
+const exploreKey = 'onionpod-explore-v2';
+const exploreMaxAge = 60 * 60_000;
+let explore = readExploreCache();
+let exploreJob = false;
+let exploreRetryAfter = 0;
 const searchCache = new Map();
 const initialRoute = { page: 'discover', depth: 0 };
 const tabs = {
@@ -153,6 +158,7 @@ function paintSync() {
   $('#sync-status').textContent = message || (connected ? 'Signed in. Your follows and listening progress sync here.'
     : enabled === false ? 'Sync is waiting for the server account to be set up.'
       : 'Sign in with the same OnionPod sync password on both devices.');
+  refreshExplore();
 }
 
 function notice(message) {
@@ -301,7 +307,6 @@ function grid(items) {
     const wrapper = el('article', 'podcast-card');
     const card = button('', () => openFeed(item.url, item), 'card');
     card.append(artwork(item, 'cover', true), el('strong', '', item.title), el('small', '', item.author || 'Podcast'));
-    if (item.category) card.append(el('small', 'category', item.category));
     const badge = el('span', 'episode-badge');
     badge.dataset.episodeBadge = item.url;
     badge.hidden = true;
@@ -321,7 +326,15 @@ function grid(items) {
     }, 'card-follow');
     followButton.setAttribute('aria-label', 'Follow ' + item.title);
     paintFollowButton(followButton, item.title, followed.has(item.url));
-    wrapper.append(card, followButton);
+    const actions = el('div', 'card-actions');
+    const category = podcastCategory(item);
+    if (category) {
+      const categoryButton = button(category.title, () => openCategory(category), 'card-category');
+      categoryButton.setAttribute('aria-label', 'Browse ' + category.title);
+      actions.append(categoryButton);
+    }
+    actions.append(followButton);
+    wrapper.append(card, actions);
     panel.append(wrapper);
   }
   return panel;
@@ -336,6 +349,11 @@ function navigate(route) {
   showRoute(next);
 }
 
+function openCategory(category) {
+  const from = state.page === 'category' ? state.category.title : tabs[state.page].toLowerCase();
+  navigate({ page: 'category', categoryId: category.id, categoryTitle: category.title, backLabel: 'Back to ' + from });
+}
+
 function showRoute(route) {
   const version = ++generation;
   state.page = route.page;
@@ -343,7 +361,10 @@ function showRoute(route) {
   state.message = '';
   $('#feed-dialog').close();
   if (route.page === 'category') {
-    loadCategory(categories.find(category => category.id === route.categoryId), version);
+    state.categoryBackLabel = route.backLabel ?? 'Back to categories';
+    const category = categories.find(item => item.id === route.categoryId)
+      ?? { id: route.categoryId, title: route.categoryTitle };
+    loadCategory(category, version);
   } else if (route.page === 'show') {
     state.returnPage = route.from;
     state.backLabel = route.backLabel;
@@ -355,6 +376,7 @@ function showRoute(route) {
     render();
   }
   if (route.page === 'library') refreshFollowedFeeds();
+  if (route.page === 'discover' && !route.query) refreshExplore();
   window.scrollTo(0, 0);
 }
 
@@ -443,7 +465,7 @@ function render() {
       const query = input.value.trim();
       if (query) navigate({ page: 'discover', query });
     });
-    hero.append(el('h1', '', 'Find your next listen.'), el('p', '', 'Search for a podcast or browse the picks below.'), form);
+    hero.append(el('h1', '', 'Find your next listen.'), el('p', '', 'Search for a podcast or explore popular shows.'), form);
     content.append(hero);
     const section = el('section', 'section');
     const heading = el('div', 'section-head');
@@ -455,12 +477,21 @@ function render() {
       if (state.message) section.append(button('Try again', () => loadSearch(state.query, ++generation)));
     }
     else if (state.results && !state.results.length) section.append(el('p', 'empty', 'No podcasts matched your search.'));
-    else section.append(grid(state.results ?? catalog));
+    else if (state.results) section.append(grid(state.results));
+    else {
+      const source = el('small');
+      source.id = 'explore-source';
+      heading.append(source);
+      const region = el('div');
+      region.id = 'explore-list';
+      section.append(region);
+    }
     content.append(section);
+    paintExplore();
   } else if (page === 'categories') {
     const list = el('div', 'category-grid');
     for (const category of categories) {
-      const card = button('', () => navigate({ page: 'category', categoryId: category.id }), 'category-card');
+      const card = button('', () => openCategory(category), 'category-card');
       const mark = el('span', 'category-mark', category.mark);
       mark.setAttribute('aria-hidden', 'true');
       card.append(mark, el('strong', '', category.title));
@@ -469,7 +500,7 @@ function render() {
     content.append(el('h1', '', 'Categories'), list);
   } else if (page === 'category') {
     const category = state.category;
-    content.append(button('Back to categories', goBack, 'back'), el('h1', '', category.title));
+    content.append(button(state.categoryBackLabel, goBack, 'back'), el('h1', '', category.title));
     if (state.loading || state.message) {
       const status = el('p', 'empty', state.message || 'Loading podcasts…');
       status.setAttribute('role', 'status');
@@ -535,6 +566,55 @@ function requestSource(url) {
   return request('/api/feed?url=' + encodeURIComponent(url), url);
 }
 
+function readExploreCache() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(exploreKey));
+    if (Array.isArray(cached?.shows) && cached.shows.length && Number.isFinite(cached.refreshedAt)) {
+      return cached;
+    }
+  } catch { /* The built-in list is available on first launch and if storage fails. */ }
+  return { shows: [], refreshedAt: 0 };
+}
+
+function paintExplore() {
+  const region = $('#explore-list');
+  if (!region || region.contains(document.activeElement)) return;
+  for (const panel of region.querySelectorAll('[data-artwork-feed]')) coverObserver.unobserve(panel);
+  const hasChart = explore.shows.length > 0;
+  $('#explore-source').textContent = hasChart ? 'Popular in the U.S. · Apple Podcasts' : 'Featured picks';
+  region.replaceChildren(grid(hasChart ? explore.shows : catalog));
+  updateEpisodeBadges();
+}
+
+async function chartShows(categoryId) {
+  const genre = categoryId ? '/genre=' + categoryId : '';
+  const chart = await requestSource('https://itunes.apple.com/us/rss/toppodcasts/limit=25' + genre + '/json');
+  const ids = chartIds(JSON.parse(chart.body));
+  if (!ids.length) return [];
+  const query = new URLSearchParams({ id: ids.join(','), entity: 'podcast', country: 'US' });
+  const details = await requestSource('https://itunes.apple.com/lookup?' + query);
+  return rankedShows(ids, JSON.parse(details.body).results ?? []);
+}
+
+async function refreshExplore() {
+  const { relayRequiresLogin } = sync.status();
+  if (state.page !== 'discover' || state.query || document.hidden || !navigator.onLine || exploreJob ||
+      Date.now() - explore.refreshedAt < exploreMaxAge || Date.now() < exploreRetryAfter ||
+      (!native && relayRequiresLogin !== false && !sync.data.signedIn)) return;
+  exploreJob = true;
+  try {
+    const shows = (await chartShows()).slice(0, 16);
+    if (!shows.length) throw new Error('The chart did not include public feeds.');
+    explore = { shows, refreshedAt: Date.now() };
+    try { localStorage.setItem(exploreKey, JSON.stringify(explore)); } catch { /* Fresh results remain available in memory. */ }
+    paintExplore();
+  } catch (error) {
+    exploreRetryAfter = error.status === 401 ? 0 : Date.now() + 60_000;
+  } finally {
+    exploreJob = false;
+  }
+}
+
 function markShowOpened(show) {
   const previous = state.episodeActivity[show.url];
   const next = episodeActivity(previous, show.episodes.map(episode => episode.id), true);
@@ -581,16 +661,7 @@ async function loadCategory(category, version) {
   render();
   if (!state.loading) return;
   try {
-    const chart = await requestSource('https://itunes.apple.com/us/rss/toppodcasts/limit=25/genre=' + category.id + '/json');
-    if (version !== generation) return;
-    const ids = chartIds(JSON.parse(chart.body));
-    let shows = [];
-    if (ids.length) {
-      const query = new URLSearchParams({ id: ids.join(','), entity: 'podcast', country: 'US' });
-      const details = await requestSource('https://itunes.apple.com/lookup?' + query);
-      shows = rankedShows(ids, JSON.parse(details.body).results ?? []);
-    }
-    chartCache.set(category.id, shows);
+    chartCache.set(category.id, await chartShows(category.id));
   } catch {
     if (version === generation) state.message = 'This category could not load. Try again in a moment.';
   } finally {
@@ -887,6 +958,7 @@ showRoute(history.state.onionPod);
 player();
 refreshFollowedFeeds();
 setInterval(refreshFollowedFeeds, feedCheckInterval);
+setInterval(refreshExplore, exploreMaxAge);
 document.addEventListener('visibilitychange', refreshFollowedFeeds);
 window.addEventListener('online', refreshFollowedFeeds);
 sync.session();
@@ -896,3 +968,5 @@ document.addEventListener('visibilitychange', () => {
   else if (!document.hidden) sync.schedule();
 });
 window.addEventListener('online', () => sync.session());
+document.addEventListener('visibilitychange', refreshExplore);
+window.addEventListener('online', refreshExplore);

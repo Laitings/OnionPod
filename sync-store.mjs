@@ -133,9 +133,12 @@ export function validateExchange(body) {
     if (type === 'follow' && key.length <= 2048 && httpsUrl(key) === key) {
       if (value === null) return { type, key, value, at };
       if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const categoryId = value.categoryId;
         return { type, key, at, value: {
           url: key, title: title(value.title, 300) || 'Untitled podcast',
-          author: title(value.author, 200), artwork: httpsUrl(title(value.artwork, 2048))
+          author: title(value.author, 200), artwork: httpsUrl(title(value.artwork, 2048)),
+          ...(typeof value.category === 'string' && value.category ? { category: title(value.category, 100) } : {}),
+          ...(Number.isInteger(categoryId) && categoryId >= 1300 && categoryId < 2000 ? { categoryId } : {})
         } };
       }
     }

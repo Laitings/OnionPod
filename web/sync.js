@@ -14,7 +14,7 @@ function recordValue(type, key, value) {
   if (key.length > 2048 || httpsUrl(key) !== key) return undefined;
   return value === null ? null : {
     url: key, title: value.title?.slice(0, 300), author: value.author?.slice(0, 200),
-    artwork: value.artwork?.slice(0, 2048)
+    artwork: value.artwork?.slice(0, 2048), category: value.category?.slice(0, 100), categoryId: value.categoryId
   };
 }
 
@@ -24,6 +24,7 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
     signedIn: Boolean(saved?.signedIn), pending: saved?.pending ?? {}, progressAt: saved?.progressAt ?? {}
   };
   let enabled = null;
+  let relayRequiresLogin = null;
   let message = '';
   let busy;
   let timer;
@@ -62,6 +63,7 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
       const result = await call('session');
       if (version !== authVersion) return;
       enabled = result.enabled;
+      relayRequiresLogin = Boolean(result.relayRequiresLogin);
       data.signedIn = result.signedIn;
       message = '';
       persist();
@@ -154,5 +156,5 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
     paint();
   }
 
-  return { data, session, login, logout, record, run: exchange, schedule, status: () => ({ enabled, message }) };
+  return { data, session, login, logout, record, run: exchange, schedule, status: () => ({ enabled, relayRequiresLogin, message }) };
 }

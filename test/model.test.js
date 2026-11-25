@@ -1,7 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chartIds, enqueue, episodeActivity, httpsUrl, rankedShows, time } from '../web/model.js';
+import { chartIds, directoryShows, enqueue, episodeActivity, httpsUrl, podcastCategory, rankedShows, time } from '../web/model.js';
 import { feedAddress, publicAddress, serve } from '../server.mjs';
+
+test('podcast cards retain the primary chart category and support older follows', () => {
+  const [show] = directoryShows([{
+    feedUrl: 'https://example.com/feed.xml', collectionName: 'The Night Show',
+    primaryGenreName: 'Science Fiction', genres: ['Podcasts', 'Science Fiction', 'Fiction'],
+    genreIds: ['26', '1485', '1483']
+  }]);
+  assert.deepEqual(podcastCategory(show), { id: 1485, title: 'Science Fiction' });
+  assert.equal(podcastCategory({ category: 'Technology' }).id, 1318);
+  assert.deepEqual(podcastCategory({
+    url: 'https://feeds.simplecast.com/BqbsxVfO', category: 'DESIGN'
+  }), { id: 1402, title: 'Design' });
+  assert.equal(podcastCategory({ category: 'Podcasts', categoryId: 26 }), null);
+});
 
 test('new episodes accumulate once and stay unread until the show opens', () => {
   const initial = episodeActivity(undefined, ['old', 'older']);

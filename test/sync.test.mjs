@@ -51,13 +51,14 @@ test('web and Android sync share durable state, with protected routes and revoke
     const phone = { ...android, Authorization: 'Bearer ' + token };
 
     const now = Date.now() - 5000;
-    const follow = { type: 'follow', key: feed, value: { title: 'A following' }, at: now };
+    const follow = { type: 'follow', key: feed,
+      value: { title: 'A following', category: 'Daily News', categoryId: 1526 }, at: now };
     const played = { type: 'progress', key: episode, value: 185, at: now };
     const send = await server.post('exchange', { cursor: 0, changes: [follow, played] }, phone);
     assert.equal(send.status, 200);
     const pull = await (await server.post('exchange', { cursor: 0, changes: [] }, web)).json();
     assert.deepEqual(pull.changes.map(item => item.value), [
-      { url: feed, title: 'A following', author: '', artwork: '' }, 185
+      { url: feed, title: 'A following', author: '', artwork: '', category: 'Daily News', categoryId: 1526 }, 185
     ]);
 
     const rewind = { ...played, value: 25, at: now + 200 };
