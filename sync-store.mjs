@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
-import { httpsUrl } from './web/model.js';
+import { episodeFeed, httpsUrl, resumeEpisode } from './web/model.js';
 
 const derive = promisify(scrypt);
 const sessionAge = 90 * 24 * 60 * 60;
@@ -22,18 +22,22 @@ export class SyncStore {
       INSERT OR IGNORE INTO counter VALUES (1, 0);
       CREATE TABLE IF NOT EXISTS sync_state (
         type TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, at INTEGER NOT NULL,
-        revision INTEGER NOT NULL UNIQUE, PRIMARY KEY (type, key)
+        revision INTEGER NOT NULL UNIQUE, episode TEXT, PRIMARY KEY (type, key)
       );
     `);
+    if (!this.db.prepare('PRAGMA table_info(sync_state)').all().some(column => column.name === 'episode')) {
+      this.db.exec('ALTER TABLE sync_state ADD COLUMN episode TEXT');
+    }
     this.account = this.db.prepare('SELECT salt, hash FROM account WHERE id = 1');
     this.readSession = this.db.prepare('SELECT expires FROM sessions WHERE digest = ?');
     this.dropSession = this.db.prepare('DELETE FROM sessions WHERE digest = ?');
-    this.record = this.db.prepare('SELECT type, key, value, at FROM sync_state WHERE type = ? AND key = ?');
-    this.recordsAfter = this.db.prepare('SELECT type, key, value, at, revision FROM sync_state WHERE revision > ? ORDER BY revision LIMIT 201');
+    this.record = this.db.prepare('SELECT type, key, value, at, episode FROM sync_state WHERE type = ? AND key = ?');
+    this.recordsAfter = this.db.prepare('SELECT type, key, value, at, episode, revision FROM sync_state WHERE revision > ? ORDER BY revision LIMIT 201');
     this.maxRevision = this.db.prepare('SELECT revision FROM counter WHERE id = 1');
     this.bump = this.db.prepare('UPDATE counter SET revision = revision + 1 WHERE id = 1 RETURNING revision');
-    this.write = this.db.prepare(`INSERT INTO sync_state VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(type, key) DO UPDATE SET value = excluded.value, at = excluded.at, revision = excluded.revision`);
+    this.write = this.db.prepare(`INSERT INTO sync_state(type, key, value, at, revision, episode) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(type, key) DO UPDATE SET value = excluded.value, at = excluded.at,
+      revision = excluded.revision, episode = excluded.episode`);
   }
 
   isReady() { return Boolean(this.account.get()); }
@@ -78,8 +82,13 @@ export class SyncStore {
         const preferLegacyProgress = old?.at === 0 && change.at === 0 && change.type === 'progress'
           && change.value > JSON.parse(old.value);
         if (!old || change.at > old.at || preferLegacyProgress) {
-          this.write.run(change.type, change.key, JSON.stringify(change.value), change.at, this.bump.get().revision);
-          return change;
+          const episode = change.episode ? JSON.stringify(change.episode) : old?.episode ?? null;
+          this.write.run(change.type, change.key, JSON.stringify(change.value), change.at, this.bump.get().revision, episode);
+          return episode ? { ...change, episode: JSON.parse(episode) } : change;
+        }
+        if (change.episode && !old.episode) {
+          this.write.run(old.type, old.key, old.value, old.at, this.bump.get().revision, JSON.stringify(change.episode));
+          return { ...decode(old), episode: change.episode };
         }
         return decode(old);
       });
@@ -104,7 +113,8 @@ export class SyncStore {
 }
 
 function decode(row) {
-  return { type: row.type, key: row.key, at: row.at, value: JSON.parse(row.value) };
+  const change = { type: row.type, key: row.key, at: row.at, value: JSON.parse(row.value) };
+  return row.episode ? { ...change, episode: JSON.parse(row.episode) } : change;
 }
 
 function title(value, max) {
@@ -123,11 +133,9 @@ export function validateExchange(body) {
     if (typeof key !== 'string' || key.length < 1 || key.length > 4096 ||
         !Number.isSafeInteger(at) || at < 0 || at > limit) throw new Error('Invalid sync update or device clock.');
     if (type === 'progress' && Number.isFinite(value) && value >= 0 && value <= 7 * 24 * 3600) {
-      let parts;
-      try { parts = JSON.parse(key); } catch { /* Not an episode key. */ }
-      if (Array.isArray(parts) && parts.length === 2 && typeof parts[0] === 'string' &&
-          httpsUrl(parts[0]) === parts[0] && typeof parts[1] === 'string' && parts[1]) {
-        return { type, key, value, at };
+      if (episodeFeed(key)) {
+        const episode = resumeEpisode(change.episode, key);
+        return episode ? { type, key, value, at, episode } : { type, key, value, at };
       }
     }
     if (type === 'follow' && key.length <= 2048 && httpsUrl(key) === key) {

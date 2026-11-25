@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { serve } from '../server.mjs';
 import { SyncStore } from '../sync-store.mjs';
@@ -53,13 +54,16 @@ test('web and Android sync share durable state, with protected routes and revoke
     const now = Date.now() - 5000;
     const follow = { type: 'follow', key: feed,
       value: { title: 'A following', category: 'Daily News', categoryId: 1526 }, at: now };
-    const played = { type: 'progress', key: episode, value: 185, at: now };
+    const details = { key: episode, feed, title: 'First episode', show: 'A following',
+      audio: 'https://example.com/episode.mp3', artwork: '', date: '' };
+    const played = { type: 'progress', key: episode, value: 185, at: now, episode: details };
     const send = await server.post('exchange', { cursor: 0, changes: [follow, played] }, phone);
     assert.equal(send.status, 200);
     const pull = await (await server.post('exchange', { cursor: 0, changes: [] }, web)).json();
     assert.deepEqual(pull.changes.map(item => item.value), [
       { url: feed, title: 'A following', author: '', artwork: '', category: 'Daily News', categoryId: 1526 }, 185
     ]);
+    assert.deepEqual(pull.changes.find(item => item.type === 'progress').episode, details);
 
     const rewind = { ...played, value: 25, at: now + 200 };
     const unfollow = { ...follow, value: null, at: now + 200 };
@@ -79,6 +83,7 @@ test('web and Android sync share durable state, with protected routes and revoke
     server = await start(store);
     const persisted = await (await server.post('exchange', { cursor: 0, changes: [] }, phone)).json();
     assert.deepEqual(persisted.changes.map(item => item.value), [null, 27]);
+    assert.deepEqual(persisted.changes.find(item => item.type === 'progress').episode, details);
     assert.equal((await server.post('logout', {}, phone)).status, 200);
     assert.equal((await server.post('exchange', { cursor: 0, changes: [] }, phone)).status, 401);
     assert.equal((await server.get('/api/sync/session', web)).status, 200);
@@ -101,4 +106,30 @@ test('existing device libraries merge without overriding newer actions', async (
     const imported = store.exchange(0, [{ type: 'follow', key: feed, value: { title: 'Old subscription' }, at: 0 }]);
     assert.equal(imported.accepted[0].value, null);
   } finally { store.close(); }
+});
+
+test('existing progress survives migration and resume metadata survives older client updates', async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'onionpod-sync-upgrade-'));
+  const position = { type: 'progress', key: episode, value: 57, at: 10 };
+  let store = new SyncStore(folder);
+  try {
+    store.exchange(0, [position]);
+    store.close();
+    store = null;
+    const legacy = new DatabaseSync(join(folder, 'onionpod.sqlite3'));
+    try { legacy.exec('ALTER TABLE sync_state DROP COLUMN episode'); }
+    finally { legacy.close(); }
+    store = new SyncStore(folder);
+    assert.deepEqual(store.exchange(0, []).changes, [position]);
+
+    const metadata = { key: episode, title: 'First episode', show: 'Test show', feed, audio: 'https://example.com/1.mp3' };
+    store.exchange(0, [{ ...position, episode: metadata }], true);
+    store.exchange(0, [{ ...position, value: 18, at: 20 }], true);
+    const [latest] = store.exchange(0, []).changes;
+    assert.equal(latest.value, 18);
+    assert.deepEqual(latest.episode, metadata);
+  } finally {
+    store?.close();
+    await rm(folder, { recursive: true, force: true });
+  }
 });

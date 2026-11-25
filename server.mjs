@@ -170,7 +170,7 @@ export function serve({ syncStore, publicOrigin, allowGuestRelay = !syncStore } 
       if (action === 'exchange') {
         if (!allowSync()) return json(429, { error: 'Sync is busy. Try again in a moment.' });
         let batch;
-        try { batch = validateExchange(await readJson(req, 512_000)); }
+        try { batch = validateExchange(await readJson(req, 1_000_000)); }
         catch { return json(400, { error: 'Invalid sync data. Make sure the device clock is correct.' }); }
         if (!syncStore.authorized(token)) return json(401, { error: 'Sign in to sync your library.' });
         try { return json(200, syncStore.exchange(batch.cursor, batch.changes, batch.pushOnly)); }

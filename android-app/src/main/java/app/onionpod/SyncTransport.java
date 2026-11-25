@@ -25,7 +25,8 @@ final class SyncTransport {
         for (int i = 0; i < events.length(); i++) {
             JSONObject event = events.getJSONObject(i);
             changes.put(new JSONObject().put("type", "progress").put("key", event.getString("key"))
-                .put("at", event.getLong("at")).put("value", event.getDouble("position")));
+                .put("at", event.getLong("at")).put("value", event.getDouble("position"))
+                .put("episode", event.optJSONObject("episode")));
         }
         JSONObject response = request("exchange", new JSONObject().put("cursor", 0)
             .put("pushOnly", true).put("changes", changes));

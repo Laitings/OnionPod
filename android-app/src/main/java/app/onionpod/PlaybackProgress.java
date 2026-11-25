@@ -10,6 +10,7 @@ import org.json.JSONObject;
 final class PlaybackProgress {
     private static final String AT = "at:";
     private static final String PENDING = "pending:";
+    private static final String EPISODE = "episode:";
 
     private static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences("progress", Context.MODE_PRIVATE);
@@ -18,11 +19,14 @@ final class PlaybackProgress {
     static long position(Context context, String key) { return prefs(context).getLong(key, 0); }
     static long time(Context context, String key) { return prefs(context).getLong(AT + key, 0); }
 
-    static void save(Context context, String key, long position) {
+    static void save(Context context, String key, long position, JSONObject episode) {
         SharedPreferences prefs = prefs(context);
         if (prefs.getLong(key, 0) == position) return;
         long at = Math.max(System.currentTimeMillis(), prefs.getLong(AT + key, 0) + 1);
-        prefs.edit().putLong(key, position).putLong(AT + key, at).putBoolean(PENDING + key, true).apply();
+        SharedPreferences.Editor edit = prefs.edit().putLong(key, position).putLong(AT + key, at)
+            .putBoolean(PENDING + key, true);
+        if (episode != null) edit.putString(EPISODE + key, episode.toString());
+        edit.apply();
     }
 
     static JSONArray pending(Context context) throws JSONException {
@@ -31,9 +35,14 @@ final class PlaybackProgress {
         for (String entry : snapshot.keySet()) {
             if (!entry.startsWith(PENDING) || !Boolean.TRUE.equals(snapshot.get(entry))) continue;
             String key = entry.substring(PENDING.length());
-            events.put(new JSONObject().put("key", key)
+            JSONObject event = new JSONObject().put("key", key)
                 .put("at", ((Number) snapshot.get(AT + key)).longValue())
-                .put("position", ((Number) snapshot.get(key)).longValue() / 1000.0));
+                .put("position", ((Number) snapshot.get(key)).longValue() / 1000.0);
+            if (snapshot.get(EPISODE + key) instanceof String) {
+                try { event.put("episode", new JSONObject((String) snapshot.get(EPISODE + key))); }
+                catch (JSONException ignored) { /* Position still syncs without metadata. */ }
+            }
+            events.put(event);
             if (events.length() == 50) break;
         }
         return events;

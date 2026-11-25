@@ -1,15 +1,11 @@
-import { httpsUrl } from './model.js';
+import { episodeFeed, httpsUrl, resumeEpisode } from './model.js';
 
 const recordId = ({ type, key }) => JSON.stringify([type, key]);
 
 function recordValue(type, key, value) {
   if (typeof key !== 'string' || !key || key.length > 4096) return undefined;
   if (type === 'progress') {
-    let parts;
-    try { parts = JSON.parse(key); } catch { return undefined; }
-    return Array.isArray(parts) && parts.length === 2 && typeof parts[0] === 'string' &&
-      httpsUrl(parts[0]) === parts[0] && typeof parts[1] === 'string' && parts[1] &&
-      Number.isFinite(value) && value >= 0 && value <= 604800 ? value : undefined;
+    return episodeFeed(key) && Number.isFinite(value) && value >= 0 && value <= 604800 ? value : undefined;
   }
   if (key.length > 2048 || httpsUrl(key) !== key) return undefined;
   return value === null ? null : {
@@ -32,28 +28,30 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
   let lastTimestamp = 0;
   let authVersion = 0;
 
-  function store(type, key, value, at) {
+  function store(type, key, value, at, episode) {
     value = recordValue(type, key, value);
     if (value === undefined) return;
     const change = { type, key, value, at };
+    const details = resumeEpisode(episode, key);
+    if (type === 'progress' && details) change.episode = details;
     const id = recordId(change);
     const previous = data.pending[id];
     if (!previous || at >= previous.at) data.pending[id] = change;
     if (type === 'progress') data.progressAt[key] = Math.max(data.progressAt[key] ?? 0, at);
   }
 
-  function record(type, key, value, urgent = false) {
+  function record(type, key, value, urgent = false, episode) {
     const last = type === 'progress' ? data.progressAt[key] ?? 0 : 0;
     lastTimestamp = Math.max(Date.now(), lastTimestamp + 1, last + 1);
-    store(type, key, value, lastTimestamp);
+    store(type, key, value, lastTimestamp, episode);
     schedule(urgent ? 300 : 3000);
   }
 
   function ingest(progress) {
-    for (const { key, at, position } of progress) {
+    for (const { key, at, position, episode } of progress) {
       if (at <= (data.progressAt[key] ?? -1)) continue;
-      apply([{ type: 'progress', key, value: position, at }]);
-      store('progress', key, position, at);
+      apply([{ type: 'progress', key, value: position, at, episode }]);
+      store('progress', key, position, at, episode);
     }
   }
 
@@ -118,9 +116,9 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
     try {
       await collect?.(ingest);
       if (!data.initialized) {
-        const { follows, progress } = local();
+        const { follows, progress, episodeDetails } = local();
         for (const show of follows) store('follow', show.url, show, 0);
-        for (const [key, position] of Object.entries(progress)) store('progress', key, position, 0);
+        for (const [key, position] of Object.entries(progress)) store('progress', key, position, 0, episodeDetails?.[key]);
         data.initialized = true;
         persist();
       }

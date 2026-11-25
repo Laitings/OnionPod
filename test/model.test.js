@@ -1,7 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chartIds, directoryShows, enqueue, episodeActivity, httpsUrl, podcastCategory, rankedShows, time } from '../web/model.js';
+import { chartIds, directoryShows, enqueue, episodeActivity, httpsUrl, podcastCategory, rankedShows, recentProgress, resumeEpisode, time } from '../web/model.js';
 import { feedAddress, publicAddress, serve } from '../server.mjs';
+
+test('Continue Listening chooses the latest unfinished episode across local and synced progress', () => {
+  const feed = 'https://example.com/episodes.xml';
+  const key = id => JSON.stringify([feed, id]);
+  const details = { key: key('current'), feed, audio: 'https://example.com/current.mp3', title: 'Example' };
+  assert.equal(resumeEpisode(details).title, 'Example');
+  assert.equal(resumeEpisode({ ...details, audio: 'https://example.com/' + 'a'.repeat(2048) }), null);
+  assert.equal(resumeEpisode({ ...details, feed: 'https://example.com/other.xml' }), null);
+  const progress = { [key('older')]: 120, [key('done')]: 0, [key('current')]: 20, [key('offline')]: 35 };
+  const remote = { [key('older')]: 50, [key('done')]: 100, [key('current')]: 80 };
+  assert.deepEqual(recentProgress(progress, remote, key('older'), { [key('offline')]: 90 }).map(item => item.key),
+    [key('offline'), key('current'), key('older')]);
+});
 
 test('podcast cards retain the primary chart category and support older follows', () => {
   const [show] = directoryShows([{

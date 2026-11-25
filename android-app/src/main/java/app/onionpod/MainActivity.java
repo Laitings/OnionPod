@@ -18,13 +18,14 @@ import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
-import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.Player;
 import androidx.media3.session.MediaController;
 import androidx.media3.session.SessionToken;
+import androidx.media3.session.SessionResult;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
+import androidx.webkit.JavaScriptReplyProxy;
 import androidx.webkit.ServiceWorkerClientCompat;
 import androidx.webkit.ServiceWorkerControllerCompat;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -43,6 +44,7 @@ public final class MainActivity extends ComponentActivity {
     private final ExecutorService io = Executors.newFixedThreadPool(2);
     private final ExecutorService syncIo = Executors.newSingleThreadExecutor();
     private SyncTransport syncTransport;
+    private PlaybackQueue queue;
     private ListenableFuture<MediaController> controllerFuture;
     private MediaController player;
     private WebView view;
@@ -50,6 +52,7 @@ public final class MainActivity extends ComponentActivity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         syncTransport = new SyncTransport(this);
+        queue = new PlaybackQueue(this);
         WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
             .addPathHandler("/app/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
         if (WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE)
@@ -91,6 +94,10 @@ public final class MainActivity extends ComponentActivity {
                     if (!main) return;
                     try {
                         JSONObject input = new JSONObject(message.getData());
+                        if (input.optString("action").equals("load")) {
+                            loadEpisode(input, reply);
+                            return;
+                        }
                         Runnable handle = () -> {
                             JSONObject result = new JSONObject();
                             try {
@@ -127,6 +134,28 @@ public final class MainActivity extends ComponentActivity {
         });
     }
 
+    private void loadEpisode(JSONObject input, JavaScriptReplyProxy reply) throws Exception {
+        int id = input.getInt("id");
+        if (player == null) {
+            reply.postMessage(new JSONObject().put("id", id).put("error", "The Android player is still connecting.").toString());
+            return;
+        }
+        JSONObject data = input.getJSONObject("data");
+        Bundle args = new Bundle();
+        args.putString("episode", data.toString());
+        args.putFloat("rate", (float) data.getDouble("rate"));
+        ListenableFuture<SessionResult> command = player.sendCustomCommand(PlaybackService.LOAD_EPISODE, args);
+        command.addListener(() -> {
+            if (isDestroyed()) return;
+            try {
+                JSONObject result = new JSONObject().put("id", id);
+                if (command.get().resultCode == SessionResult.RESULT_SUCCESS) result.put("value", queue.snapshot());
+                else result.put("error", "Android could not open this episode.");
+                reply.postMessage(result.toString());
+            } catch (Exception ignored) { }
+        }, commandResult -> runOnUiThread(commandResult));
+    }
+
     private Object execute(JSONObject request) throws Exception {
         String action = request.getString("action");
         JSONObject data = request.getJSONObject("data");
@@ -136,30 +165,13 @@ public final class MainActivity extends ComponentActivity {
             PlaybackProgress.acknowledge(this, data.getJSONArray("events"));
             return true;
         }
+        if (action.equals("queue")) return queue.edit(data);
         if (action.equals("fetch")) return fetch(data.getString("url"));
         if (action.equals("download") || action.equals("offline") || action.equals("remove")) {
             return downloads(action, data);
         }
         if (player == null) throw new IllegalStateException("The Android player is still connecting.");
         switch (action) {
-            case "load":
-                MediaItem previous = player.getCurrentMediaItem();
-                if (previous != null && player.getPlaybackState() != Player.STATE_IDLE
-                        && player.getPlaybackState() != Player.STATE_ENDED) {
-                    PlaybackProgress.save(this, previous.mediaId, player.getCurrentPosition());
-                }
-                String key = data.getString("key");
-                Uri local = offlineUri(downloadId(key));
-                MediaItem item = new MediaItem.Builder().setMediaId(key)
-                    .setUri(local == null ? Uri.parse(https(data.getString("audio")).toString()) : local)
-                    .setMediaMetadata(new MediaMetadata.Builder().setTitle(data.getString("title"))
-                        .setArtist(data.getString("show")).build()).build();
-                long position = PlaybackProgress.chooseResume(this, key, data);
-                player.setMediaItem(item, position);
-                player.setPlaybackSpeed((float) data.getDouble("rate"));
-                player.prepare();
-                player.play();
-                return true;
             case "toggle":
                 if (player.getPlayWhenReady() && player.getPlaybackState() != Player.STATE_ENDED) player.pause();
                 else {
@@ -174,12 +186,20 @@ public final class MainActivity extends ComponentActivity {
             case "rate": player.setPlaybackSpeed((float) data.getDouble("rate")); return true;
             case "status":
                 MediaItem active = player.getCurrentMediaItem();
-                return new JSONObject().put("key", active == null ? "" : active.mediaId)
+                JSONObject status = new JSONObject().put("key", active == null ? "" : active.mediaId)
+                    .put("episode", EpisodeMedia.from(active))
+                    .put("at", active == null ? 0 : PlaybackProgress.time(this, active.mediaId))
                     .put("duration", player.getDuration() == C.TIME_UNSET ? 0 : player.getDuration() / 1000.0)
                     .put("position", player.getCurrentPosition() / 1000.0)
                     .put("playing", player.getPlayWhenReady() && player.getPlaybackState() != Player.STATE_ENDED && player.getPlayerError() == null)
                     .put("ended", player.getPlaybackState() == Player.STATE_ENDED)
                     .put("error", player.getPlayerError() == null ? "" : "This episode could not be played.");
+                if (queue.revision() != data.optInt("queueRevision", -1)) status.put("queue", queue.snapshot());
+                String previousKey = data.optString("previousKey");
+                if (active != null && !previousKey.isEmpty() && !previousKey.equals(active.mediaId)) {
+                    status.put("previousPosition", PlaybackProgress.position(this, previousKey) / 1000.0);
+                }
+                return status;
             default: throw new IllegalArgumentException("Unsupported operation.");
         }
     }

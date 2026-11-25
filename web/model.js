@@ -211,6 +211,35 @@ export function enqueue(queue, episode) {
   return queue.some(item => item.key === episode.key) ? queue : [...queue, episode];
 }
 
+export function episodeFeed(key) {
+  try {
+    const parts = JSON.parse(key);
+    if (Array.isArray(parts) && parts.length === 2 && typeof parts[0] === 'string' &&
+        parts[0] && httpsUrl(parts[0]) === parts[0] && typeof parts[1] === 'string' && parts[1]) return parts[0];
+  } catch { /* Invalid episode key. */ }
+  return '';
+}
+
+export function resumeEpisode(value, key = value?.key) {
+  const feed = episodeFeed(key);
+  const clip = (field, limit) => typeof field === 'string' ? field.slice(0, limit) : '';
+  const safeLink = field => typeof field === 'string' && field.length <= 2048 ? httpsUrl(field) : '';
+  const audio = safeLink(value?.audio);
+  if (!feed || !audio || value.feed !== feed) return null;
+  return {
+    key, feed, audio, title: clip(value.title, 300) || 'Untitled episode',
+    show: clip(value.show, 200) || 'Podcast', artwork: safeLink(value.artwork),
+    date: clip(value.date, 100)
+  };
+}
+
+export function recentProgress(progress, timestamps, currentKey, localTimestamps = {}) {
+  return Object.entries(progress)
+    .filter(([key, position]) => Number.isFinite(position) && position > 0 && episodeFeed(key))
+    .map(([key, position]) => ({ key, position, at: Math.max(timestamps[key] ?? 0, localTimestamps[key] ?? 0) }))
+    .sort((a, b) => b.at - a.at || Number(b.key === currentKey) - Number(a.key === currentKey));
+}
+
 export function time(seconds) {
   const value = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
   const mins = Math.floor(value / 60);

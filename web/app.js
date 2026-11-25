@@ -1,4 +1,4 @@
-import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, httpsUrl, parseFeed, readArtwork, readEpisodeIds, episodeActivity, enqueue, time } from './model.js';
+import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, httpsUrl, parseFeed, readArtwork, readEpisodeIds, episodeActivity, enqueue, episodeFeed, recentProgress, resumeEpisode, time } from './model.js';
 import { createSync } from './sync.js';
 
 const $ = selector => document.querySelector(selector);
@@ -9,6 +9,7 @@ let saved;
 try { saved = JSON.parse(localStorage.getItem(key)) ?? {}; } catch { saved = {}; }
 const state = {
   follows: saved.follows ?? [], queue: saved.queue ?? [], progress: saved.progress ?? {},
+  episodeDetails: saved.episodeDetails ?? {}, nativeProgressAt: saved.nativeProgressAt ?? {},
   episodeActivity: saved.episodeActivity ?? {},
   downloads: saved.downloads ?? [], current: saved.current ?? null, rate: saved.rate ?? 1,
   openEpisodeNotes: new Set(),
@@ -25,6 +26,9 @@ let generation = 0;
 let noticeTimer;
 let nativeId = 0;
 let endedKey = '';
+let nativeQueueRevision = -1;
+let nativeQueueReady;
+const resumeLookups = new Map();
 const waiting = new Map();
 const feedCheckAfter = new Map();
 const feedCheckInterval = 5 * 60_000;
@@ -51,7 +55,7 @@ const sync = createSync({
   saved: saved.syncState,
   call: syncRequest,
   persist: save,
-  local: () => ({ follows: state.follows, progress: state.progress }),
+  local: () => ({ follows: state.follows, progress: state.progress, episodeDetails: state.episodeDetails }),
   collect: native ? async ingest => {
     const pending = await android('local-progress');
     if (!pending.length) return;
@@ -95,9 +99,9 @@ function android(action, data = {}) {
 }
 
 function save() {
-  const { follows, queue, progress, current, rate, downloads, episodeActivity } = state;
+  const { follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt } = state;
   try {
-    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, downloads, episodeActivity, syncState: sync.data }));
+    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt, syncState: sync.data }));
     return true;
   } catch {
     notice('OnionPod could not save changes on this device.');
@@ -126,7 +130,7 @@ async function syncRequest(action, data) {
 function applySync(changes) {
   let libraryChanged = false;
   let progressChanged = false;
-  for (const { type, key, value } of changes) {
+  for (const { type, key, value, at, episode } of changes) {
     if (type === 'follow') {
       const existing = state.follows.some(show => show.url === key);
       if (value === null && existing) {
@@ -138,16 +142,20 @@ function applySync(changes) {
         state.follows.push(value);
         libraryChanged = true;
       }
-    } else if (state.progress[key] !== value) {
-      state.progress[key] = value;
-      progressChanged = true;
-      if (state.current?.key === key && !playing && !activeKey) {
-        position = value;
-        player();
+    } else if (type === 'progress') {
+      if (episode) state.episodeDetails[key] = episode;
+      if (at >= (state.nativeProgressAt[key] ?? 0) && state.progress[key] !== value) {
+        state.progress[key] = value;
+        progressChanged = true;
+        if (state.current?.key === key && !playing && !activeKey) {
+          position = value;
+          player();
+        }
       }
     }
   }
   if (libraryChanged || (progressChanged && !playing && ['show', 'queue', 'downloads'].includes(state.page))) render();
+  if (state.page === 'discover') paintContinueListening();
   if (libraryChanged) refreshFollowedFeeds();
 }
 
@@ -385,6 +393,90 @@ function goBack() {
   if (history.state?.onionPod?.depth > 0) history.back();
 }
 
+function episodeWithResume(episode) {
+  return { ...episode, resume: state.progress[episode.key], resumeAt: sync.data.progressAt[episode.key] };
+}
+
+function applyNativeQueue(snapshot) {
+  if (!snapshot || snapshot.revision < 1 || snapshot.revision <= nativeQueueRevision) return false;
+  nativeQueueRevision = snapshot.revision;
+  state.queue = snapshot.items;
+  save();
+  return true;
+}
+
+function initializeNativeQueue() {
+  if (!nativeQueueReady) {
+    nativeQueueReady = android('queue', { op: 'initialize', items: state.queue.map(episodeWithResume) })
+      .then(snapshot => { if (applyNativeQueue(snapshot)) render(); })
+      .catch(error => { nativeQueueReady = undefined; throw error; });
+  }
+  return nativeQueueReady;
+}
+
+async function editQueue(op, episode, index) {
+  try {
+    if (native) {
+      await initializeNativeQueue();
+      applyNativeQueue(await android('queue', {
+        op, key: episode.key, ...(op === 'add' ? { episode: episodeWithResume(episode) } : {})
+      }));
+    } else if (op === 'add') {
+      state.queue = enqueue(state.queue, episode);
+    } else if (op === 'remove') {
+      state.queue = state.queue.filter(item => item.key !== episode.key);
+    } else if (index > 0 && state.queue[index]?.key === episode.key) {
+      [state.queue[index - 1], state.queue[index]] = [state.queue[index], state.queue[index - 1]];
+    }
+    save();
+    render();
+    if (op === 'add') notice('Added to your queue.');
+  } catch (error) { notice(error.message); }
+}
+
+function findResumeEpisode(key) {
+  return state.episodeDetails[key] ?? (state.current?.key === key ? resumeEpisode(state.current) : null);
+}
+
+function recoverResumeEpisode(key) {
+  if ((resumeLookups.get(key) ?? 0) > Date.now()) return;
+  resumeLookups.set(key, Date.now() + 60_000);
+  const url = episodeFeed(key);
+  requestSource(url).then(data => {
+    const show = parseFeed(data.body, data.url, url);
+    const episode = resumeEpisode(show.episodes.find(item => item.key === key));
+    if (!episode) return;
+    state.episodeDetails[key] = episode;
+    save();
+    paintContinueListening();
+  }).catch(() => { /* Keep any available local resume option. */ });
+}
+
+function paintContinueListening() {
+  const panel = $('#continue-listening');
+  if (!panel) return;
+  const candidates = recentProgress(state.progress, sync.data.progressAt, state.current?.key, state.nativeProgressAt);
+  if (candidates.length && !findResumeEpisode(candidates[0].key) && navigator.onLine) {
+    recoverResumeEpisode(candidates[0].key);
+  }
+  const latest = candidates.find(item => findResumeEpisode(item.key));
+  panel.hidden = !latest;
+  if (!latest) return;
+  const episode = findResumeEpisode(latest.key);
+  if (panel.dataset.episode !== episode.key) {
+    panel.dataset.episode = episode.key;
+    const card = el('div', 'continue-card');
+    const copy = el('div', 'continue-copy');
+    copy.append(el('strong', '', episode.title), el('small', 'continue-meta'));
+    const play = button('Resume', () => start(episode), 'primary continue-action');
+    card.append(artwork(episode, 'mini-cover', true), copy, play);
+    panel.replaceChildren(el('h2', '', 'Continue Listening'), card);
+  }
+  const pause = activeKey === episode.key && playing;
+  panel.querySelector('.continue-action').textContent = pause ? 'Pause' : 'Resume';
+  panel.querySelector('.continue-meta').textContent = episode.show + ' · ' + time(latest.position);
+}
+
 function insertList(target, episodes, context) {
   if (!episodes.length) {
     target.append(el('p', 'empty', {
@@ -407,18 +499,11 @@ function insertList(target, episodes, context) {
     const actions = el('div', 'actions');
     actions.append(button(state.current?.key === episode.key ? 'Play / pause' : 'Play', () => start(episode)));
     if (context === 'queue') {
-      const up = button('Move up', () => {
-        [state.queue[index - 1], state.queue[index]] = [state.queue[index], state.queue[index - 1]];
-        save(); render();
-      });
+      const up = button('Move up', () => editQueue('move-up', episode, index));
       up.disabled = index === 0;
-      actions.append(up, button('Remove', () => { state.queue = state.queue.filter(item => item.key !== episode.key); save(); render(); }));
+      actions.append(up, button('Remove', () => editQueue('remove', episode)));
     } else if (context !== 'downloads') {
-      const add = button('Queue', () => {
-        state.queue = enqueue(state.queue, episode);
-        save(); render();
-        notice('Added to your queue.');
-      });
+      const add = button('Queue', () => editQueue('add', episode));
       add.disabled = state.queue.some(item => item.key === episode.key);
       actions.append(add);
     }
@@ -482,6 +567,12 @@ function render() {
     });
     hero.append(el('h1', '', 'Find your next listen.'), el('p', '', 'Search for a podcast or explore popular shows.'), form);
     content.append(hero);
+    if (!state.query) {
+      const resume = el('section', 'section');
+      resume.id = 'continue-listening';
+      content.append(resume);
+      paintContinueListening();
+    }
     const section = el('section', 'section');
     const heading = el('div', 'section-head');
     heading.append(el('h2', '', state.results ? 'Search results' : 'Explore podcasts'));
@@ -753,9 +844,12 @@ function checkpoint(force = false) {
   if (observed !== undefined && Math.abs(observed - position) < (force ? 0.1 : 0.75)) return;
   observedPositions.set(key, position);
   state.progress[key] = position;
-  if (!native) sync.record('progress', key, position, force);
+  const episode = resumeEpisode(state.current);
+  if (episode) state.episodeDetails[key] = episode;
+  if (!native) sync.record('progress', key, position, force, episode);
   lastCheckpoint = Date.now();
   save();
+  paintContinueListening();
 }
 
 function player() {
@@ -776,6 +870,11 @@ function player() {
   $('#seek').max = Math.floor(duration) || 0;
   if (!$('#seek').matches(':active')) $('#seek').value = Math.floor(position);
   $('#seek').setAttribute('aria-valuetext', time(position));
+  const quickResume = $('.continue-action');
+  if (quickResume) {
+    const cardKey = $('#continue-listening').dataset.episode;
+    quickResume.textContent = playing && cardKey === activeKey ? 'Pause' : 'Resume';
+  }
 }
 
 async function start(episode, fromQueue = false) {
@@ -797,9 +896,8 @@ async function start(episode, fromQueue = false) {
     } else {
       checkpoint(true);
       if (native) {
-        await android('load', {
-          ...episode, rate: state.rate, resume: state.progress[episode.key], resumeAt: sync.data.progressAt[episode.key]
-        });
+        await initializeNativeQueue();
+        applyNativeQueue(await android('load', { ...episodeWithResume(episode), rate: state.rate }));
         state.current = episode;
         activeKey = episode.key;
       } else {
@@ -822,7 +920,7 @@ async function start(episode, fromQueue = false) {
       position = state.progress[episode.key] ?? 0;
       save(); render(); player();
       if (audio) await audio.play();
-      if (!fromQueue && state.queue.some(item => item.key === episode.key)) {
+      if (!native && !fromQueue && state.queue.some(item => item.key === episode.key)) {
         state.queue = state.queue.filter(item => item.key !== episode.key);
         save(); render();
       }
@@ -883,22 +981,33 @@ if (audio) {
 } else {
   let polling = false;
   setInterval(async () => {
-    if (polling || busy || !state.current) return;
+    if (polling || busy) return;
     polling = true;
     try {
-      const status = await android('status');
-      if (!busy && status.key === state.current?.key) {
+      const status = await android('status', { queueRevision: nativeQueueRevision, previousKey: state.current?.key });
+      if (busy) return;
+      const queueChanged = applyNativeQueue(status.queue);
+      const switched = status.episode && status.key !== state.current?.key;
+      if (switched) {
+        if (state.current && status.previousPosition !== undefined) {
+          state.progress[state.current.key] = status.previousPosition;
+        }
+        state.current = status.episode;
+        activeKey = status.key;
+        save();
+      }
+      if (status.key && status.key === state.current?.key) {
         const wasPlaying = playing;
         activeKey = status.key;
-        position = status.position; duration = status.duration; playing = status.playing;
+        position = status.ended ? 0 : status.position; duration = status.duration; playing = status.playing;
+        if (status.at > (state.nativeProgressAt[status.key] ?? 0)) state.nativeProgressAt[status.key] = status.at;
         if (status.error && status.error !== state.playbackError) notice(status.error);
         state.playbackError = status.error;
-        if (playing) endedKey = '';
-        if (status.ended) await advance();
-        else checkpoint();
+        checkpoint(status.ended);
         if (wasPlaying && !playing) sync.schedule(500);
         player();
       }
+      if (queueChanged || switched) render();
     } catch { /* Controller may still be connecting. */ }
     finally { polling = false; }
   }, 750);
@@ -972,6 +1081,7 @@ window.addEventListener('popstate', event => showRoute(event.state?.onionPod ?? 
 if (!history.state?.onionPod) history.replaceState({ onionPod: initialRoute }, '');
 showRoute(history.state.onionPod);
 player();
+if (native) initializeNativeQueue().catch(() => {});
 refreshFollowedFeeds();
 setInterval(refreshFollowedFeeds, feedCheckInterval);
 setInterval(refreshExplore, exploreMaxAge);

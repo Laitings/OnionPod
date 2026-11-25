@@ -40,6 +40,11 @@ input:not([type=range]){min-width:0;min-height:48px;background:#121711;color:var
 .primary:hover{background:#e7ffac}
 .outline{border:1px solid var(--line)}
 .section{margin-top:34px}
+.continue-card{display:flex;align-items:center;gap:12px;margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.continue-copy{flex:1;min-width:0}
+.continue-copy strong,.continue-copy small{display:block;overflow-wrap:anywhere}
+.continue-meta{margin-top:4px;color:var(--muted)}
+.continue-action{flex-shrink:0}
 .section-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:14px}
 h2{font-size:25px;letter-spacing:-.035em}
 .section-head small,.meta,.empty,.episode small{color:var(--muted)}

@@ -31,6 +31,8 @@ Save the generated password in a password manager. Using `node sync-admin.mjs --
 
 Open **Sync** on the web and Android and sign in with the same password. The first sign-in imports existing follows and listening positions. Both apps keep local changes and retry when they can reach the server. Android also uploads playback checkpoints while its playback service runs. The latest dated update wins, so a recent rewind or unfollow is preserved. Queue, download files, and new episode badge counts stay on each device.
 
+**Continue Listening** on Discover resumes your most recent unfinished episode. With sync enabled, it includes playback from the other device. Existing listening positions are kept when the server adds episode metadata to its database.
+
 Before making the site reachable from mobile data, verify that a signed-out request to `/api/search?q=podcast` and `/api/feed?url=https://example.com/feed.xml` receives HTTP 401 from OnionPod on an allowed network. In private staging, test follow and unfollow in both directions, then pause an episode on Android and resume it on the web. Verify Movie Tracker still works. Repeat the phone test over mobile data after the NAS access profile is deliberately opened.
 
 ## Android
@@ -45,7 +47,7 @@ With `JAVA_HOME` and `ANDROID_HOME` configured, build and lint from the root:
 
 On macOS or Linux use `./gradlew` in place of `.\gradlew.bat`. The debug APK is at `android-app/build/outputs/apk/debug/android-app-debug.apk`.
 
-Android packages the shared interface locally and accesses feeds directly. Media3 runs the active episode in a playback service and exposes Android media controls. Download episodes from their episode lists and play completed downloads from the Downloads tab. Use a device to verify lock-screen controls, audio focus, background playback and offline playback before release. Queue auto-advance currently depends on the app screen being active on Android.
+Android packages the shared interface locally and accesses feeds directly. Media3 runs playback in a service and exposes Android media controls. When an episode finishes, the service starts the next queued episode even if the app is in the background or the screen is locked. Downloaded episodes play from their local file. Download episodes from their episode lists and play completed downloads from the Downloads tab.
 
 ## Project layout
 
