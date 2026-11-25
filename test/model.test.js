@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, estimateReleasePattern, httpsUrl, inboxNewestFirst, parseFeed, podcastCategory, rankedShows, readFeedEpisodes, recentProgress, resumeEpisode, time } from '../web/model.js';
+import { categories, chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, estimateReleasePattern, httpsUrl, inboxNewestFirst, mergeShows, parseFeed, podcastCategory, rankedShows, readFeedEpisodes, recentProgress, resumeEpisode, time } from '../web/model.js';
 import { feedAddress, publicAddress, serve } from '../server.mjs';
 
 test('Continue Listening chooses the latest unfinished episode across local and synced progress', () => {
@@ -124,6 +124,15 @@ test('category results retain chart order and skip missing or insecure feed URLs
     { collectionId: 4, collectionName: 'First', feedUrl: 'https://example.com/first.xml' }
   ];
   assert.deepEqual(rankedShows(ids, results).map(show => show.title), ['First', 'Second']);
+});
+
+test('topic categories interleave search results without duplicate feeds', () => {
+  const topic = categories.find(category => category.id === 'paranormal-uap');
+  assert.ok(topic && Array.isArray(topic.queries) && topic.queries.length >= 2);
+  const uap = [{ url: 'https://a.example/feed', title: 'UAP 1' }, { url: 'https://shared.example/feed', title: 'Shared' }];
+  const paranormal = [{ url: 'https://b.example/feed', title: 'Para 1' }, { url: 'https://shared.example/feed', title: 'Shared' }, { url: 'https://c.example/feed', title: 'Para 2' }];
+  assert.deepEqual(mergeShows([uap, paranormal], 4).map(show => show.title), ['UAP 1', 'Para 1', 'Shared', 'Para 2']);
+  assert.deepEqual(mergeShows([uap, paranormal], 2).map(show => show.title), ['UAP 1', 'Para 1']);
 });
 
 test('queue preserves order and ignores duplicate episode keys', () => {

@@ -33,6 +33,7 @@ export const categories = [
   { id: 1483, title: 'Fiction', mark: '✧' },
   { id: 1487, title: 'History', mark: '◷' },
   { id: 1489, title: 'News', mark: '▥' },
+  { id: 'paranormal-uap', title: 'Paranormal & UAP', mark: '✦', queries: ['UAP UFO', 'paranormal'] },
   { id: 1533, title: 'Science', mark: '⊙' },
   { id: 1324, title: 'Society & Culture', mark: '◎' },
   { id: 1545, title: 'Sports', mark: '◉' },
@@ -74,6 +75,22 @@ export function chartIds(chart) {
 export function rankedShows(ids, results) {
   const byId = new Map(results.map(item => [String(item.collectionId ?? item.trackId), item]));
   return directoryShows(ids.map(id => byId.get(id)).filter(Boolean));
+}
+
+export function mergeShows(lists, limit = 25) {
+  const merged = [];
+  const seen = new Set();
+  const max = Math.max(0, ...lists.map(list => list.length));
+  for (let index = 0; index < max && merged.length < limit; index++) {
+    for (const list of lists) {
+      const show = list[index];
+      if (!show || seen.has(show.url)) continue;
+      seen.add(show.url);
+      merged.push(show);
+      if (merged.length >= limit) break;
+    }
+  }
+  return merged;
 }
 
 export function httpsUrl(value, base) {

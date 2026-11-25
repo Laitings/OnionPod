@@ -1,4 +1,4 @@
-import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, resumeEpisode, time } from './model.js';
+import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, mergeShows, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, resumeEpisode, time } from './model.js';
 import { createSync } from './sync.js';
 
 const $ = selector => document.querySelector(selector);
@@ -702,7 +702,8 @@ function render() {
       if (state.message) content.append(button('Try again', () => loadCategory(category, ++generation)));
     } else {
       const heading = el('div', 'section-head');
-      heading.append(el('h2', '', 'Top podcasts'), el('small', '', 'Apple Podcasts · US'));
+      heading.append(el('h2', '', category.queries ? 'Popular podcasts' : 'Top podcasts'),
+        el('small', '', category.queries ? 'Apple Podcasts · Topic' : 'Apple Podcasts · US'));
       const shows = chartCache.get(category.id) ?? [];
       content.append(heading, shows.length ? grid(shows) : el('p', 'empty', 'No public HTTPS feeds are available in this category right now.'));
     }
@@ -888,6 +889,17 @@ async function refreshFollowedFeeds() {
   }
 }
 
+async function searchDirectory(query) {
+  const params = new URLSearchParams({ term: query, media: 'podcast', limit: '18' });
+  const { body } = await request('/api/search?q=' + encodeURIComponent(query), 'https://itunes.apple.com/search?' + params);
+  return directoryShows(JSON.parse(body).results ?? []);
+}
+
+async function topicShows(queries) {
+  const lists = await Promise.all(queries.map(searchDirectory));
+  return mergeShows(lists);
+}
+
 async function loadCategory(category, version) {
   state.category = category;
   state.message = '';
@@ -895,7 +907,7 @@ async function loadCategory(category, version) {
   render();
   if (!state.loading) return;
   try {
-    chartCache.set(category.id, await chartShows(category.id));
+    chartCache.set(category.id, category.queries ? await topicShows(category.queries) : await chartShows(category.id));
   } catch {
     if (version === generation) state.message = 'This category could not load. Try again in a moment.';
   } finally {
@@ -910,10 +922,9 @@ async function loadSearch(query, version) {
   render();
   if (!state.loading) return;
   try {
-    const params = new URLSearchParams({ term: query, media: 'podcast', limit: '18' });
-    const { body } = await request('/api/search?q=' + encodeURIComponent(query), 'https://itunes.apple.com/search?' + params);
+    const shows = await searchDirectory(query);
     if (version !== generation) return;
-    state.results = directoryShows(JSON.parse(body).results ?? []);
+    state.results = shows;
     searchCache.set(query, state.results);
   } catch (error) {
     if (version === generation) state.message = 'Search could not load. ' + error.message;
