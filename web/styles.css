@@ -73,6 +73,10 @@ button.card-category:hover{text-decoration:underline;text-underline-offset:3px}
 .show-header .cover{width:clamp(84px,19vw,170px);flex-shrink:0}
 .show-header h1{font-size:clamp(29px,5vw,57px);overflow-wrap:anywhere}
 .show-header .meta{margin:8px 0}
+.show-release{margin:0 0 12px;line-height:1.45;color:var(--muted);overflow-wrap:anywhere}
+.show-release strong{color:var(--accent)}
+.show-release small{font-size:.88em}
+.show-release time+small{display:block}
 .show-description{margin:0 0 28px;max-width:72ch}
 .show-description h2{margin-bottom:8px}
 .show-description p{color:var(--muted);line-height:1.55;white-space:pre-line;overflow-wrap:anywhere}

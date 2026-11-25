@@ -315,7 +315,7 @@ function toggleFollow(show) {
     state.inbox = state.inbox.filter(episode => episode.feed !== url);
     sync.record('follow', url, null, true);
   } else {
-    const { episodes, notesFor, ...details } = show;
+    const { episodes, notesFor, releaseTiming, ...details } = show;
     details.artwork ||= coverUrls.get(url);
     state.follows.push(details);
     if (episodes) markShowOpened(show);
@@ -500,6 +500,27 @@ function paintContinueListening() {
   const pause = activeKey === episode.key && playing;
   panel.querySelector('.continue-action').textContent = pause ? 'Pause' : 'Resume';
   panel.querySelector('.continue-meta').textContent = episode.show + ' · ' + time(latest.position);
+}
+
+function releaseInfo(timing) {
+  if (!timing) return null;
+  const line = el('p', 'show-release');
+  if (timing.kind === 'scheduled') {
+    const date = new Date(timing.at);
+    const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'long', timeStyle: 'short' });
+    const when = el('time', '', format.format(date));
+    when.dateTime = date.toISOString();
+    line.append(el('strong', '', 'Upcoming'), ' · ', when);
+    if (timing.title) line.append(el('small', '', timing.title));
+  } else {
+    let cadence = timing.cadence === 'daily' ? 'daily' : 'on weekdays';
+    if (timing.weekday !== undefined) {
+      const day = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][timing.weekday];
+      cadence = timing.cadence === 'weekly' ? 'on ' + day + 's' : 'every other ' + day;
+    }
+    line.append('Usually releases ' + cadence + ' · ', el('small', '', 'Estimate'));
+  }
+  return line;
 }
 
 function insertList(target, episodes, context) {
@@ -696,6 +717,8 @@ function render() {
     const copy = el('div');
     const following = state.follows.some(item => item.url === show.url);
     copy.append(el('h1', '', show.title), el('p', 'meta', show.author || 'Podcast'));
+    const timing = releaseInfo(show.releaseTiming);
+    if (timing) copy.append(timing);
     copy.append(button(following ? 'Unfollow' : 'Follow podcast', () => {
       toggleFollow(show);
       render();
@@ -723,7 +746,10 @@ function render() {
   } else {
     content.append(el('h1', '', { favorites: 'Favorites', inbox: 'New Episodes', queue: 'Up next', downloads: 'Downloads' }[page]));
     if (page === 'favorites') insertList(content, state.favorites, 'favorites');
-    else if (page === 'inbox') insertList(content, inboxNewestFirst(state.inbox), 'inbox');
+    else if (page === 'inbox') {
+      const now = Date.now();
+      insertList(content, inboxNewestFirst(state.inbox.filter(episode => !(Date.parse(episode.date) > now))), 'inbox');
+    }
     else insertList(content, page === 'queue' ? state.queue : state.downloads, page);
   }
   updateEpisodeBadges();

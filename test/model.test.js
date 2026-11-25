@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, httpsUrl, inboxNewestFirst, podcastCategory, rankedShows, recentProgress, resumeEpisode, time } from '../web/model.js';
+import { chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, estimateReleasePattern, httpsUrl, inboxNewestFirst, parseFeed, podcastCategory, rankedShows, readFeedEpisodes, recentProgress, resumeEpisode, time } from '../web/model.js';
 import { feedAddress, publicAddress, serve } from '../server.mjs';
 
 test('Continue Listening chooses the latest unfinished episode across local and synced progress', () => {
@@ -68,6 +68,50 @@ test('the inbox imports previously unread releases once and orders episodes by d
   assert.deepEqual(upgraded.added, [release]);
   assert.deepEqual(episodeInboxUpdate(upgraded.activity, [release, old]).added, []);
   assert.deepEqual(inboxNewestFirst([old, release, undated]), [release, undated, old]);
+});
+
+test('an upcoming date appears before audio is available and future audio stays out of the inbox', () => {
+  const node = (localName, textContent = '', children = [], attrs = {}) => ({
+    localName, textContent, children, getAttribute: name => attrs[name] ?? null
+  });
+  const item = (id, date, audio) => node('item', '', [
+    node('guid', id), node('title', id), node('pubDate', date),
+    ...(audio ? [node('enclosure', '', [], { type: 'audio/mpeg', url: `https://example.com/${id}.mp3` })] : [])
+  ]);
+  const channel = node('channel', '', [node('title', 'Example show'),
+    item('later', 'Fri, 11 Dec 2026 12:00:00 GMT', true),
+    item('announcement', 'Wed, 25 Nov 2026 12:00:00 GMT', false),
+    item('preview', 'Fri, 27 Nov 2026 12:00:00 GMT', true),
+    item('published', 'Fri, 20 Nov 2026 12:00:00 GMT', true)]);
+  class FeedDOM {
+    parseFromString() { return { documentElement: node('rss', '', [channel]), getElementsByTagName: () => [] }; }
+  }
+  const feed = 'https://example.com/feed';
+  const now = Date.parse('2026-11-24T12:00:00Z');
+  const previewTime = Date.parse('2026-11-27T12:00:00Z');
+  const show = parseFeed('', feed, feed, FeedDOM, now);
+  assert.deepEqual(show.releaseTiming, { kind: 'scheduled', at: Date.parse('2026-11-25T12:00:00Z'), title: 'announcement' });
+  assert.deepEqual(show.episodes.map(episode => episode.id), ['published']);
+  const initial = episodeInboxUpdate(undefined, readFeedEpisodes('', feed, feed, FeedDOM, previewTime - 1));
+  const afterRelease = readFeedEpisodes('', feed, feed, FeedDOM, previewTime);
+  assert.deepEqual(episodeInboxUpdate(initial.activity, afterRelease).added.map(episode => episode.id), ['preview']);
+  assert.equal(parseFeed('', feed, feed, FeedDOM, previewTime).releaseTiming.title, 'later');
+});
+
+test('release estimates need a consistent recent pattern in local calendar dates', () => {
+  const dates = days => days.map(day => new Date(2026, 10, day, 12).toISOString());
+  const now = new Date(2026, 10, 25, 15).getTime();
+  assert.deepEqual(estimateReleasePattern(dates([20, 13, 6, -1, -8]), now),
+    { kind: 'estimated', cadence: 'weekly', weekday: 5 });
+  assert.deepEqual(estimateReleasePattern(dates([20, 6, -8, -22, -36]), now),
+    { kind: 'estimated', cadence: 'fortnightly', weekday: 5 });
+  assert.deepEqual(estimateReleasePattern(dates([25, 24, 23, 20, 19, 18, 17]), now),
+    { kind: 'estimated', cadence: 'weekdays' });
+  assert.deepEqual(estimateReleasePattern(dates([24, 23, 22, 21, 20, 19, 18]), now),
+    { kind: 'estimated', cadence: 'daily' });
+  assert.equal(estimateReleasePattern(dates([20, 13, 6, -1, -8]), new Date(2026, 10, 28).getTime()), null);
+  assert.equal(estimateReleasePattern(dates([20, 13, 7, -1, -8]), now), null);
+  assert.equal(estimateReleasePattern([...dates([20, 13, 6, -1, -1]), 'invalid'], now), null);
 });
 
 test('category results retain chart order and skip missing or insecure feed URLs', () => {

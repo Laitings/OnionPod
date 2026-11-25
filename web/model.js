@@ -144,10 +144,17 @@ function firstDescription(fields) {
   return '';
 }
 
-function* playableEntries(channel, base) {
+function episodeItems(channel) {
+  return Array.from(channel.children).filter(item => item.localName === 'entry' || item.localName === 'item');
+}
+
+const publicationDate = item => text(item, 'pubDate') || text(item, 'published');
+
+function* playableEntries(channel, base, now) {
   const seen = new Set();
-  for (const item of channel.children) {
-    if (!['entry', 'item'].includes(item.localName)) continue;
+  for (const item of episodeItems(channel)) {
+    const published = publicationDate(item);
+    if (Date.parse(published) > now) continue;
     const enclosure = Array.from(item.children).find(child => {
       const type = child.getAttribute('type') ?? '';
       return (child.localName === 'enclosure' || child.localName === 'link' && child.getAttribute('rel') === 'enclosure')
@@ -158,22 +165,55 @@ function* playableEntries(channel, base) {
     const id = text(item, 'guid') || text(item, 'id') || audio;
     if (seen.has(id)) continue;
     seen.add(id);
-    yield { id, item, audio };
+    yield { id, item, audio, published };
   }
 }
 
-function feedEpisode({ id, item, audio }, feed, show, artwork) {
+function feedEpisode({ id, item, audio, published }, feed, show, artwork) {
   return {
     key: JSON.stringify([feed, id]), id, audio, title: text(item, 'title') || 'Untitled episode',
-    feed, show, artwork, date: text(item, 'pubDate') || text(item, 'published') || text(item, 'updated')
+    feed, show, artwork, date: published || text(item, 'updated')
   };
 }
 
-export function readFeedEpisodes(xml, base, original, DOM = globalThis.DOMParser) {
+export function readFeedEpisodes(xml, base, original, DOM = globalThis.DOMParser, now = Date.now()) {
   const channel = readChannel(xml, DOM);
   const title = text(channel, 'title') || 'Untitled podcast';
   const artwork = channelArtwork(channel, base);
-  return Array.from(playableEntries(channel, base), entry => feedEpisode(entry, original, title, artwork));
+  return Array.from(playableEntries(channel, base, now), entry => feedEpisode(entry, original, title, artwork));
+}
+
+const dayMs = 24 * 60 * 60_000;
+// Compare local calendar dates without measuring elapsed hours across daylight saving changes.
+const calendarDay = date => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+const weekday = day => new Date(day).getUTCDay();
+const nextWeekday = day => day + (weekday(day) === 5 ? 3 : 1) * dayMs;
+
+export function estimateReleasePattern(dates, now = Date.now()) {
+  const days = [...new Set(dates.map(date => Date.parse(date))
+    .filter(at => at <= now).map(at => calendarDay(new Date(at))))].sort((a, b) => b - a);
+  const [latest] = days;
+  const today = calendarDay(new Date(now));
+  const matches = (count, next) => days.length >= count && next(latest) >= today &&
+    days.slice(1, count).every((day, index) => next(day) === days[index]);
+  if (matches(7, day => day + dayMs)) return { kind: 'estimated', cadence: 'daily' };
+  if (days.slice(0, 7).every(day => weekday(day) >= 1 && weekday(day) <= 5) && matches(7, nextWeekday)) {
+    return { kind: 'estimated', cadence: 'weekdays' };
+  }
+  if (matches(5, day => day + 7 * dayMs)) return { kind: 'estimated', cadence: 'weekly', weekday: weekday(latest) };
+  if (matches(5, day => day + 14 * dayMs)) return { kind: 'estimated', cadence: 'fortnightly', weekday: weekday(latest) };
+  return null;
+}
+
+function releaseTiming(channel, publishedEntries, now) {
+  let upcoming = null;
+  for (const item of episodeItems(channel)) {
+    const at = Date.parse(publicationDate(item));
+    if (at > now && (!upcoming || at < upcoming.at)) upcoming = { kind: 'scheduled', at, title: text(item, 'title') };
+  }
+  if (upcoming) return upcoming;
+  const regularDates = publishedEntries.filter(({ item }) => !['bonus', 'trailer'].includes(text(item, 'episodeType').toLowerCase()));
+  return estimateReleasePattern(regularDates.map(({ published }) => published), now);
 }
 
 export function episodeActivity(previous, ids, opened = false) {
@@ -208,12 +248,13 @@ export function inboxNewestFirst(episodes) {
   return [...episodes].sort((a, b) => byDate(b) - byDate(a));
 }
 
-export function parseFeed(xml, base, original, DOM = globalThis.DOMParser) {
+export function parseFeed(xml, base, original, DOM = globalThis.DOMParser, now = Date.now()) {
   const channel = readChannel(xml, DOM);
   const title = text(channel, 'title') || 'Untitled podcast';
   const artwork = channelArtwork(channel, base);
   const episodeNotes = new Map();
-  const episodes = Array.from(playableEntries(channel, base), entry => {
+  const entries = [...playableEntries(channel, base, now)];
+  const episodes = entries.map(entry => {
     const episode = feedEpisode(entry, original, title, artwork);
     const fields = [...descriptionFields(entry.item, ['encoded', 'description', 'summary', 'content', 'subtitle'])];
     if (fields.length) episodeNotes.set(episode.key, fields);
@@ -221,7 +262,7 @@ export function parseFeed(xml, base, original, DOM = globalThis.DOMParser) {
   });
   return {
     url: original, title, artwork, description: firstDescription(descriptionFields(channel, ['description', 'summary', 'subtitle'])),
-    author: text(channel, 'author') || text(channel, 'creator'), episodes,
+    author: text(channel, 'author') || text(channel, 'creator'), episodes, releaseTiming: releaseTiming(channel, entries, now),
     notesFor(key) {
       const fields = episodeNotes.get(key);
       if (typeof fields === 'string') return fields;
