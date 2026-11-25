@@ -12,6 +12,7 @@ const state = {
   episodeDetails: saved.episodeDetails ?? {}, nativeProgressAt: saved.nativeProgressAt ?? {},
   episodeActivity: saved.episodeActivity ?? {},
   inbox: saved.inbox ?? [],
+  favorites: saved.favorites ?? [],
   downloads: saved.downloads ?? [], current: saved.current ?? null, rate: saved.rate ?? 1,
   openEpisodeNotes: new Set(),
   page: 'discover', show: null, query: '', results: null, message: '', loading: false
@@ -23,6 +24,8 @@ let activeKey = '';
 let busy = false;
 let lastCheckpoint = 0;
 const observedPositions = new Map();
+const episodePlayButtons = new Map();
+let playingCard;
 let generation = 0;
 let noticeTimer;
 let nativeId = 0;
@@ -44,7 +47,7 @@ const searchCache = new Map();
 const initialRoute = { page: 'discover', depth: 0 };
 const tabs = {
   discover: 'Discover', categories: 'Categories', category: 'Categories', show: 'Podcast',
-  library: 'Library', inbox: 'Inbox', queue: 'Queue', downloads: 'Downloads'
+  library: 'Library', favorites: 'Favorites', inbox: 'Inbox', queue: 'Queue', downloads: 'Downloads'
 };
 const coverUrls = new Map(catalog.map(show => [show.url, show.artwork]));
 const coverJobs = new Map();
@@ -100,9 +103,9 @@ function android(action, data = {}) {
 }
 
 function save() {
-  const { follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox } = state;
+  const { follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites } = state;
   try {
-    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, syncState: sync.data }));
+    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, syncState: sync.data }));
     return true;
   } catch {
     notice('OnionPod could not save changes on this device.');
@@ -156,7 +159,7 @@ function applySync(changes) {
       }
     }
   }
-  if (libraryChanged || (progressChanged && !playing && ['show', 'queue', 'downloads'].includes(state.page))) render();
+  if (libraryChanged || (progressChanged && !playing && ['show', 'queue', 'downloads', 'favorites'].includes(state.page))) render();
   if (state.page === 'discover') paintContinueListening();
   if (libraryChanged) refreshFollowedFeeds();
 }
@@ -191,6 +194,24 @@ function button(label, fn, cls = 'outline') {
   element.type = 'button';
   element.addEventListener('click', fn);
   return element;
+}
+
+function paintEpisodeButton(control, symbol, action, title) {
+  control.textContent = symbol;
+  control.title = action;
+  control.setAttribute('aria-label', action + ' ' + title);
+}
+
+function episodeButton(symbol, action, episode, fn) {
+  const control = button('', fn, 'outline episode-icon');
+  paintEpisodeButton(control, symbol, action, episode.title);
+  return control;
+}
+
+function paintFavorite(control, selected) {
+  control.textContent = selected ? '♥︎' : '♡';
+  control.title = selected ? 'Remove from favorites' : 'Save to favorites';
+  control.setAttribute('aria-pressed', String(selected));
 }
 function setupArtworkCache() {
   if (!('serviceWorker' in navigator)) return Promise.resolve();
@@ -486,12 +507,14 @@ function insertList(target, episodes, context) {
     target.append(el('p', 'empty', {
       feed: 'No playable HTTPS audio episodes were found in this feed.',
       inbox: state.follows.length ? 'You’re caught up. New releases from the shows you follow will appear here.' : 'Follow a podcast to get its new episodes here.',
+      favorites: 'Tap the heart on an episode to save it here.',
       queue: 'Your queue is empty. Add an episode to line up what plays next.',
       downloads: 'Your downloads will appear here.'
     }[context]));
     return;
   }
   const list = el('div', 'episodes');
+  const favoriteKeys = new Set(state.favorites.map(episode => episode.key));
   for (const [index, episode] of episodes.entries()) {
     const row = el('article', 'episode');
     if (state.current?.key === episode.key) row.dataset.active = '';
@@ -502,49 +525,76 @@ function insertList(target, episodes, context) {
     if (context === 'downloads') meta.push({ pending: 'Downloading', ready: 'Available offline', failed: 'Download failed' }[episode.downloadState] ?? 'Checking download');
     info.append(el('strong', '', episode.title), el('small', '', meta.filter(Boolean).join(' · ')));
     const actions = el('div', 'actions');
-    const play = button(state.current?.key === episode.key ? 'Play / pause' : 'Play', () => start(episode));
+    const isPlaying = playing && activeKey === episode.key;
+    const play = episodeButton(isPlaying ? '❚❚' : '▶︎', isPlaying ? 'Pause' : 'Play', episode, () => start(episode));
+    episodePlayButtons.set(episode.key, { control: play, title: episode.title });
+    if (isPlaying) playingCard = episodePlayButtons.get(episode.key);
     actions.append(play);
+
+    const favorite = episodeButton('♡', 'Favorite', episode, () => {
+      const selected = favorite.getAttribute('aria-pressed') === 'true';
+      if (selected) {
+        state.favorites = state.favorites.filter(item => item.key !== episode.key);
+      } else {
+        const { key, id, feed, audio, title, show, artwork, date } = episode;
+        state.favorites = [{ key, id, feed, audio, title, show, artwork, date }, ...state.favorites];
+      }
+      save();
+      if (context === 'favorites' && selected) {
+        render();
+        const hearts = document.querySelectorAll('.episode-favorite');
+        (hearts[Math.min(index, hearts.length - 1)] ?? $('#app-back')).focus();
+      } else paintFavorite(favorite, !selected);
+    });
+    favorite.classList.add('episode-favorite');
+    paintFavorite(favorite, favoriteKeys.has(episode.key));
+    actions.append(favorite);
+
     if (context === 'inbox') {
-      play.setAttribute('aria-label', 'Play ' + episode.title);
-      const dismiss = button('Dismiss', () => {
+      const dismiss = episodeButton('×', 'Dismiss', episode, () => {
         removeInboxEpisodes([episode.key]);
         const controls = document.querySelectorAll('.inbox-dismiss');
         (controls[Math.min(index, controls.length - 1)] ?? $('[data-page=inbox]')).focus();
-      }, 'outline inbox-dismiss');
-      dismiss.setAttribute('aria-label', 'Dismiss ' + episode.title);
+      });
+      dismiss.classList.add('inbox-dismiss');
       actions.append(dismiss);
     } else if (context === 'queue') {
-      const up = button('Move up', () => editQueue('move-up', episode, index));
+      const up = episodeButton('↑', 'Move up', episode, () => editQueue('move-up', episode, index));
       up.disabled = index === 0;
-      actions.append(up, button('Remove', () => editQueue('remove', episode)));
+      actions.append(up, episodeButton('×', 'Remove from queue', episode, () => editQueue('remove', episode)));
     } else if (context !== 'downloads') {
-      const add = button('Queue', () => editQueue('add', episode));
-      add.disabled = state.queue.some(item => item.key === episode.key);
+      const queued = state.queue.some(item => item.key === episode.key);
+      const add = episodeButton(queued ? '☷✓' : '☷⁺', queued ? 'Already queued' : 'Add to queue', episode,
+        () => editQueue('add', episode));
+      add.disabled = queued;
       actions.append(add);
     }
     if (native && context !== 'inbox') {
       const downloaded = state.downloads.find(item => item.key === episode.key);
       if (context === 'downloads') {
-        if (episode.downloadState === 'failed') actions.append(button('Retry', () => download(episode)));
-        actions.append(button('Remove', () => removeDownload(episode)));
+        if (episode.downloadState === 'failed') actions.append(episodeButton('↻', 'Retry download', episode, () => download(episode)));
+        actions.append(episodeButton('×', 'Remove download of', episode, () => removeDownload(episode)));
       } else {
-        const downloadButton = button(downloaded ? 'In Downloads' : 'Download', () => downloaded ? go('downloads') : download(episode));
+        const downloadButton = episodeButton(downloaded ? '✓' : '↓', downloaded ? 'Open Downloads for' : 'Download', episode,
+          () => downloaded ? navigate({ page: 'downloads' }) : download(episode));
         actions.append(downloadButton);
       }
     }
     row.append(info, actions);
     const notes = context === 'feed' ? state.show.notesFor(episode.key) : '';
     if (notes) {
-      const details = el('details', 'episode-notes');
-      details.open = state.openEpisodeNotes.has(episode.key);
-      const summary = el('summary', '', 'Show notes');
-      summary.setAttribute('aria-label', 'Show notes for ' + episode.title);
-      details.append(summary, el('div', 'episode-notes-text', notes));
-      details.addEventListener('toggle', () => {
-        if (!details.isConnected) return;
-        if (details.open) state.openEpisodeNotes.add(episode.key);
-        else state.openEpisodeNotes.delete(episode.key);
+      const details = el('div', 'episode-notes', notes);
+      details.id = 'episode-notes-' + index;
+      details.hidden = !state.openEpisodeNotes.has(episode.key);
+      const disclosure = episodeButton('▤', 'Show notes for', episode, () => {
+        details.hidden = !details.hidden;
+        disclosure.setAttribute('aria-expanded', String(!details.hidden));
+        if (details.hidden) state.openEpisodeNotes.delete(episode.key);
+        else state.openEpisodeNotes.add(episode.key);
       });
+      disclosure.setAttribute('aria-expanded', String(!details.hidden));
+      disclosure.setAttribute('aria-controls', details.id);
+      actions.append(disclosure);
       row.append(details);
     }
     list.append(row);
@@ -556,7 +606,7 @@ function render() {
   const page = state.page;
   $('#app-back').hidden = !history.state?.onionPod?.depth || page === 'show' || page === 'category';
   const parent = page === 'show' ? state.returnPage : page;
-  const activeTab = parent === 'category' ? 'categories' : parent;
+  const activeTab = parent === 'category' ? 'categories' : parent === 'favorites' ? 'library' : parent;
   for (const tab of document.querySelectorAll('[data-page]')) {
     const selected = tab.dataset.page === activeTab;
     if (selected) tab.setAttribute('aria-current', 'page');
@@ -565,6 +615,8 @@ function render() {
   $('#queue-count').textContent = state.queue.length || '';
   $('#section-label').textContent = tabs[page];
   const content = $('#content');
+  episodePlayButtons.clear();
+  playingCard = undefined;
   for (const panel of content.querySelectorAll('[data-artwork-feed]')) coverObserver.unobserve(panel);
   content.replaceChildren();
   if (page === 'discover') {
@@ -664,9 +716,13 @@ function render() {
       more.classList.add('more');
       content.append(more);
     }
+  } else if (page === 'library') {
+    const heading = el('div', 'library-heading');
+    heading.append(el('h1', '', 'Your library'), button('Favorites', () => navigate({ page: 'favorites' })));
+    content.append(heading, state.follows.length ? grid(state.follows) : el('p', 'empty', 'Follow a podcast to find it here.'));
   } else {
-    content.append(el('h1', '', { library: 'Your library', inbox: 'New Episodes', queue: 'Up next', downloads: 'Downloads' }[page]));
-    if (page === 'library') content.append(state.follows.length ? grid(state.follows) : el('p', 'empty', 'Follow a podcast to find it here.'));
+    content.append(el('h1', '', { favorites: 'Favorites', inbox: 'New Episodes', queue: 'Up next', downloads: 'Downloads' }[page]));
+    if (page === 'favorites') insertList(content, state.favorites, 'favorites');
     else if (page === 'inbox') insertList(content, inboxNewestFirst(state.inbox), 'inbox');
     else insertList(content, page === 'queue' ? state.queue : state.downloads, page);
   }
@@ -916,6 +972,12 @@ function player() {
   $('#seek').max = Math.floor(duration) || 0;
   if (!$('#seek').matches(':active')) $('#seek').value = Math.floor(position);
   $('#seek').setAttribute('aria-valuetext', time(position));
+  const episodeCard = playing ? episodePlayButtons.get(activeKey) : undefined;
+  if (episodeCard !== playingCard) {
+    if (playingCard) paintEpisodeButton(playingCard.control, '▶︎', 'Play', playingCard.title);
+    if (episodeCard) paintEpisodeButton(episodeCard.control, '❚❚', 'Pause', episodeCard.title);
+    playingCard = episodeCard;
+  }
   const quickResume = $('.continue-action');
   if (quickResume) {
     const cardKey = $('#continue-listening').dataset.episode;
