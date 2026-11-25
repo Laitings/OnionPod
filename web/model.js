@@ -126,14 +126,20 @@ function descriptionText(markup) {
     .trim();
 }
 
-function showDescription(channel) {
-  for (const name of ['description', 'summary', 'subtitle']) {
-    for (const node of channel.children) {
+function* descriptionFields(parent, names) {
+  for (const name of names) {
+    for (const node of parent.children) {
       if (node.localName !== name) continue;
-      const value = node.children.length ? node.innerHTML : node.textContent;
-      const description = descriptionText(value);
-      if (description) return description;
+      const markup = node.children.length ? node.innerHTML : node.textContent;
+      if (markup?.trim()) yield markup;
     }
+  }
+}
+
+function firstDescription(fields) {
+  for (const markup of fields) {
+    const description = descriptionText(markup);
+    if (description) return description;
   }
   return '';
 }
@@ -176,14 +182,28 @@ export function parseFeed(xml, base, original, DOM = globalThis.DOMParser) {
   const channel = readChannel(xml, DOM);
   const title = text(channel, 'title') || 'Untitled podcast';
   const artwork = channelArtwork(channel, base);
-  const episodes = Array.from(playableEntries(channel, base), ({ id, item, audio }) => ({
-    key: JSON.stringify([original, id]), id, audio, title: text(item, 'title') || 'Untitled episode',
-    feed: original, show: title, artwork,
-    date: text(item, 'pubDate') || text(item, 'published') || text(item, 'updated')
-  }));
+  const episodeNotes = new Map();
+  const episodes = Array.from(playableEntries(channel, base), ({ id, item, audio }) => {
+    const key = JSON.stringify([original, id]);
+    const fields = [...descriptionFields(item, ['encoded', 'description', 'summary', 'content', 'subtitle'])];
+    if (fields.length) episodeNotes.set(key, fields);
+    return {
+      key, id, audio, title: text(item, 'title') || 'Untitled episode',
+      feed: original, show: title, artwork,
+      date: text(item, 'pubDate') || text(item, 'published') || text(item, 'updated')
+    };
+  });
   return {
-    url: original, title, artwork, description: showDescription(channel),
-    author: text(channel, 'author') || text(channel, 'creator'), episodes
+    url: original, title, artwork, description: firstDescription(descriptionFields(channel, ['description', 'summary', 'subtitle'])),
+    author: text(channel, 'author') || text(channel, 'creator'), episodes,
+    notesFor(key) {
+      const fields = episodeNotes.get(key);
+      if (typeof fields === 'string') return fields;
+      if (!fields) return '';
+      const notes = firstDescription(fields);
+      episodeNotes.set(key, notes);
+      return notes;
+    }
   };
 }
 

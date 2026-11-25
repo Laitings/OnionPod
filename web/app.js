@@ -11,6 +11,7 @@ const state = {
   follows: saved.follows ?? [], queue: saved.queue ?? [], progress: saved.progress ?? {},
   episodeActivity: saved.episodeActivity ?? {},
   downloads: saved.downloads ?? [], current: saved.current ?? null, rate: saved.rate ?? 1,
+  openEpisodeNotes: new Set(),
   page: 'discover', show: null, query: '', results: null, message: '', loading: false
 };
 let position = state.progress[state.current?.key] ?? 0;
@@ -282,7 +283,7 @@ function toggleFollow(show) {
     feedCheckAfter.delete(url);
     sync.record('follow', url, null, true);
   } else {
-    const { episodes, ...details } = show;
+    const { episodes, notesFor, ...details } = show;
     details.artwork ||= coverUrls.get(url);
     state.follows.push(details);
     if (episodes) markShowOpened(show);
@@ -432,6 +433,20 @@ function insertList(target, episodes, context) {
       }
     }
     row.append(info, actions);
+    const notes = context === 'feed' ? state.show.notesFor(episode.key) : '';
+    if (notes) {
+      const details = el('details', 'episode-notes');
+      details.open = state.openEpisodeNotes.has(episode.key);
+      const summary = el('summary', '', 'Show notes');
+      summary.setAttribute('aria-label', 'Show notes for ' + episode.title);
+      details.append(summary, el('div', 'episode-notes-text', notes));
+      details.addEventListener('toggle', () => {
+        if (!details.isConnected) return;
+        if (details.open) state.openEpisodeNotes.add(episode.key);
+        else state.openEpisodeNotes.delete(episode.key);
+      });
+      row.append(details);
+    }
     list.append(row);
   }
   target.append(list);
@@ -700,6 +715,7 @@ function openFeed(value, hint = {}) {
 async function loadFeed(url, hint, version) {
   state.show = null;
   state.episodeLimit = 50;
+  state.openEpisodeNotes.clear();
   render();
   try {
     const data = await requestSource(url);
