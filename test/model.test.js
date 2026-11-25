@@ -64,6 +64,11 @@ test('server exposes shared assets and rejects a local feed before fetching', as
   try {
     const home = await fetch(base);
     assert.match(await home.text(), /<title>OnionPod<\/title>/);
+    assert.match(home.headers.get('content-security-policy'), /connect-src 'self'/);
+    const worker = await fetch(base + '/artwork-worker.js?v=2');
+    assert.equal(worker.status, 200);
+    assert.match(worker.headers.get('content-security-policy'), /connect-src https:/);
+    assert.equal(worker.headers.get('cache-control'), 'no-cache');
     assert.equal((await fetch(base + '/server.mjs')).status, 404);
     assert.equal((await fetch(base + '/api/feed?url=https://127.0.0.1')).status, 502);
   } finally { await new Promise(resolve => server.close(resolve)); }

@@ -39,6 +39,7 @@ const coverUrls = new Map(catalog.map(show => [show.url, show.artwork]));
 const coverJobs = new Map();
 let activeCoverJobs = 0;
 const pendingCovers = [];
+const artworkWorkerScript = new URL('./artwork-worker.js?v=2', window.location.href).href;
 const artworkReady = setupArtworkCache();
 const sync = createSync({
   saved: saved.syncState,
@@ -177,28 +178,35 @@ function button(label, fn, cls = 'outline') {
 function setupArtworkCache() {
   if (!('serviceWorker' in navigator)) return Promise.resolve();
   const worker = navigator.serviceWorker;
-  worker.register('./artwork-worker.js').catch(() => {});
-  if (worker.controller) return Promise.resolve();
+  worker.register(artworkWorkerScript).catch(() => {});
+  if (worker.controller?.scriptURL === artworkWorkerScript) return Promise.resolve();
   return new Promise(resolve => {
     const ready = () => {
       clearTimeout(timer);
-      worker.removeEventListener('controllerchange', ready);
+      worker.removeEventListener('controllerchange', changed);
       resolve();
     };
+    const changed = () => {
+      if (worker.controller?.scriptURL === artworkWorkerScript) ready();
+    };
     const timer = setTimeout(ready, 1200);
-    worker.addEventListener('controllerchange', ready);
+    worker.addEventListener('controllerchange', changed);
   });
 }
 
-function showImage(panel, source) {
+function showImage(panel, source, retryAfterUpdate = true) {
   if (!httpsUrl(source)) return;
   const image = el('img');
   image.alt = '';
   image.loading = 'lazy';
   image.referrerPolicy = 'no-referrer';
   image.addEventListener('error', () => {
-    navigator.serviceWorker?.controller?.postMessage({ type: 'forget-artwork', url: source });
+    const worker = navigator.serviceWorker;
+    worker?.controller?.postMessage({ type: 'forget-artwork', url: source });
     image.remove();
+    if (retryAfterUpdate && worker?.controller && worker.controller.scriptURL !== artworkWorkerScript) {
+      worker.addEventListener('controllerchange', () => showImage(panel, source, false), { once: true });
+    }
   });
   artworkReady.then(() => {
     if (!panel.isConnected) return;

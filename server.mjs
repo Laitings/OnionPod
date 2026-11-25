@@ -79,6 +79,7 @@ const assets = new Map([
   })
 ]);
 const policy = "default-src 'self'; img-src 'self' https:; media-src https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+const artworkWorkerPolicy = "default-src 'none'; connect-src https:";
 
 async function readJson(req, limit) {
   const type = req.headers['content-type']?.split(';')[0].toLowerCase();
@@ -117,7 +118,6 @@ export function serve({ syncStore, publicOrigin, allowGuestRelay = !syncStore } 
   return createServer({ requestTimeout: 15_000, headersTimeout: 10_000, connectionsCheckingInterval: 2000 }, async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', policy);
     const json = (code, body) => {
       res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(body));
@@ -126,6 +126,7 @@ export function serve({ syncStore, publicOrigin, allowGuestRelay = !syncStore } 
     try { url = new URL('http://localhost' + req.url); }
     catch { return json(400, { error: 'Invalid request URL.' }); }
     if (!req.url.startsWith('/') || url.origin !== 'http://localhost') return json(400, { error: 'Invalid request URL.' });
+    res.setHeader('Content-Security-Policy', url.pathname === '/artwork-worker.js' ? artworkWorkerPolicy : policy);
     const fromAndroid = req.headers['x-onionpod-client'] === 'android' && !req.headers.origin && !req.headers['sec-fetch-site'];
     const token = fromAndroid
       ? (req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+)$/)?.[1] ?? '')
@@ -198,6 +199,7 @@ export function serve({ syncStore, publicOrigin, allowGuestRelay = !syncStore } 
     if (!asset) return json(404, { error: 'Page not found.' });
     try {
       const body = await readFile(new URL('./web/' + asset[0], import.meta.url));
+      if (url.pathname === '/artwork-worker.js') res.setHeader('Cache-Control', 'no-cache');
       res.writeHead(200, { 'Content-Type': asset[1] });
       res.end(body);
     } catch { json(500, { error: 'Application file unavailable.' }); }
