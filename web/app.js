@@ -1,4 +1,4 @@
-import { catalog, httpsUrl, parseFeed, enqueue, time } from './model.js';
+import { catalog, httpsUrl, parseFeed, readArtwork, enqueue, time } from './model.js';
 
 const $ = selector => document.querySelector(selector);
 const native = window.OnionNative;
@@ -22,6 +22,18 @@ let noticeTimer;
 let nativeId = 0;
 let endedKey = '';
 const waiting = new Map();
+const coverUrls = new Map(catalog.map(show => [show.url, show.artwork]));
+const coverJobs = new Map();
+let activeCoverJobs = 0;
+const pendingCovers = [];
+const coverObserver = new IntersectionObserver(entries => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    coverObserver.unobserve(entry.target);
+    pendingCovers.push(entry.target);
+  }
+  loadVisibleCovers();
+});
 
 if (native) {
   $('[data-page=downloads]').hidden = false;
@@ -73,17 +85,56 @@ function button(label, fn, cls = 'outline') {
   element.addEventListener('click', fn);
   return element;
 }
-function artwork(item, cls = 'cover') {
+function showImage(panel, source) {
+  if (!httpsUrl(source)) return;
+  const image = el('img');
+  image.alt = '';
+  image.loading = 'lazy';
+  image.referrerPolicy = 'no-referrer';
+  image.addEventListener('error', () => image.remove());
+  image.src = source;
+  panel.append(image);
+}
+
+function loadVisibleCovers() {
+  while (activeCoverJobs < 3 && pendingCovers.length) {
+    const panel = pendingCovers.shift();
+    if (!panel.isConnected) continue;
+    const url = panel.dataset.artworkFeed;
+    let job = coverJobs.get(url);
+    if (coverUrls.has(url)) {
+      showImage(panel, coverUrls.get(url));
+      continue;
+    }
+    if (!job) {
+      activeCoverJobs++;
+      job = request('/api/feed?url=' + encodeURIComponent(url), url)
+        .then(data => {
+          const source = readArtwork(data.body, data.url);
+          coverUrls.set(url, source);
+          return source;
+        })
+        .catch(() => '')
+        .finally(() => {
+          coverJobs.delete(url);
+          activeCoverJobs--;
+          loadVisibleCovers();
+        });
+      coverJobs.set(url, job);
+    }
+    job.then(source => { if (panel.isConnected) showImage(panel, source); });
+  }
+}
+
+function artwork(item, cls = 'cover', lookup = false) {
   const fallback = item.mark ?? item.title?.slice(0, 1) ?? '◉';
   const panel = el('div', cls + (item.color ? ' ' + item.color : ''), fallback);
   panel.setAttribute('aria-hidden', 'true');
-  if (httpsUrl(item.artwork)) {
-    const image = el('img');
-    image.src = item.artwork;
-    image.alt = '';
-    image.loading = 'lazy';
-    image.addEventListener('error', () => image.remove());
-    panel.append(image);
+  const source = item.artwork || coverUrls.get(item.url ?? item.feed);
+  if (source) showImage(panel, source);
+  else if (lookup && httpsUrl(item.url ?? item.feed)) {
+    panel.dataset.artworkFeed = item.url ?? item.feed;
+    coverObserver.observe(panel);
   }
   return panel;
 }
@@ -92,7 +143,7 @@ function grid(items) {
   const panel = el('div', 'grid');
   for (const item of items) {
     const card = button('', () => openFeed(item.url, item), 'card');
-    card.append(artwork(item), el('strong', '', item.title), el('small', '', item.author || 'Podcast'));
+    card.append(artwork(item, 'cover', true), el('strong', '', item.title), el('small', '', item.author || 'Podcast'));
     if (item.category) card.append(el('small', 'category', item.category));
     panel.append(card);
   }
@@ -171,6 +222,7 @@ function render() {
   $('#queue-count').textContent = state.queue.length || '';
   $('#section-label').textContent = { discover: 'Discover', show: 'Podcast', library: 'Library', queue: 'Queue', downloads: 'Downloads' }[page];
   const content = $('#content');
+  for (const panel of content.querySelectorAll('[data-artwork-feed]')) coverObserver.unobserve(panel);
   content.replaceChildren();
   if (page === 'discover') {
     const hero = el('section', 'hero');
@@ -273,7 +325,8 @@ async function openFeed(value, hint = {}) {
   try {
     const data = await request('/api/feed?url=' + encodeURIComponent(url), url);
     const show = parseFeed(data.body, data.url, url);
-    if (version === generation) state.show = { ...hint, ...show, author: show.author || hint.author };
+    if (show.artwork) coverUrls.set(url, show.artwork);
+    if (version === generation) state.show = { ...hint, ...show, artwork: show.artwork || hint.artwork, author: show.author || hint.author };
   } catch (error) {
     if (version === generation) state.message = 'Could not open this feed. ' + error.message;
   } finally { if (version === generation) render(); }
@@ -308,7 +361,8 @@ function player() {
   $('#now-show').textContent = current?.show ?? 'Choose an episode to start';
   const cover = $('#now-cover');
   if (cover.dataset.key !== current?.key && current) {
-    const next = artwork(current, 'mini-cover'); next.id = 'now-cover'; next.dataset.key = current.key; cover.replaceWith(next);
+    coverObserver.unobserve(cover);
+    const next = artwork(current, 'mini-cover', true); next.id = 'now-cover'; next.dataset.key = current.key; cover.replaceWith(next);
   }
   $('#toggle').textContent = playing ? '❚❚' : '▶';
   $('#toggle').setAttribute('aria-label', playing ? 'Pause' : 'Play');
@@ -343,7 +397,10 @@ async function start(episode, fromQueue = false) {
         const resume = state.progress[episode.key] ?? 0;
         if (resume > 0) audio.currentTime = resume;
         if ('mediaSession' in navigator && 'MediaMetadata' in window) {
-          navigator.mediaSession.metadata = new MediaMetadata({ title: episode.title, artist: episode.show });
+          const cover = episode.artwork || coverUrls.get(episode.feed);
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: episode.title, artist: episode.show, artwork: httpsUrl(cover) ? [{ src: cover }] : []
+          });
         }
       }
       endedKey = '';

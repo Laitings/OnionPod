@@ -1,8 +1,12 @@
 export const catalog = [
-  { title: '99% Invisible', author: 'Roman Mars', category: 'DESIGN', color: 'amber', mark: '99%', url: 'https://feeds.simplecast.com/BqbsxVfO' },
-  { title: 'Planet Money', author: 'NPR', category: 'ECONOMICS', color: 'mint', mark: '$', url: 'https://feeds.npr.org/510289/podcast.xml' },
-  { title: 'The Moth', author: 'The Moth', category: 'STORIES', color: 'lilac', mark: '✳', url: 'https://rss.amperwave.net/v2/feed/audacynetwork/the-moth' },
-  { title: 'Radiolab', author: 'WNYC Studios', category: 'SCIENCE', color: 'coral', mark: '◉', url: 'https://feeds.simplecast.com/EmVW7VGp' }
+  { title: '99% Invisible', author: 'Roman Mars', category: 'DESIGN', color: 'amber', mark: '99%', url: 'https://feeds.simplecast.com/BqbsxVfO',
+    artwork: 'https://image.simplecastcdn.com/images/8436e3c1-2479-4466-ac48-fa58259960bb/a6d5b177-ab5d-430d-b3f2-b393a09d8101/3000x3000/sxm-cover-99percentinvisible-r2025-3000x3000-final.jpg' },
+  { title: 'Planet Money', author: 'NPR', category: 'ECONOMICS', color: 'mint', mark: '$', url: 'https://feeds.npr.org/510289/podcast.xml',
+    artwork: 'https://media.npr.org/assets/img/2022/10/24/pm_new_tile_2022_sq-e543deddd0a46a98be481b46e6a72efa6b52236f.jpg?s=1400&c=66&f=jpg' },
+  { title: 'The Moth', author: 'The Moth', category: 'STORIES', color: 'lilac', mark: '✳', url: 'https://rss.amperwave.net/v2/feed/audacynetwork/the-moth',
+    artwork: 'https://images.castfire.com/image/661/0/0/0/0-8486082.jpg' },
+  { title: 'Radiolab', author: 'WNYC Studios', category: 'SCIENCE', color: 'coral', mark: '◉', url: 'https://feeds.simplecast.com/EmVW7VGp',
+    artwork: 'https://image.simplecastcdn.com/images/2c9187d6-9dff-4257-bc55-469cf13afd48/60a2cfed-b8ca-460b-abb8-8ab0afb3fa8c/3000x3000/radiolab-showsquare-3000x3000.jpg' }
 ];
 
 export function httpsUrl(value, base) {
@@ -17,15 +21,33 @@ export function httpsUrl(value, base) {
 const direct = (node, name) => Array.from(node.children).find(child => child.localName === name);
 const text = (node, name) => direct(node, name)?.textContent.trim() ?? '';
 
-export function parseFeed(xml, base, original, DOM = globalThis.DOMParser) {
+function readChannel(xml, DOM) {
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error('This feed uses an unsupported XML declaration.');
   const document = new DOM().parseFromString(xml, 'application/xml');
   const root = document.documentElement;
   const channel = root.localName === 'rss' ? direct(root, 'channel') : root.localName === 'feed' ? root : null;
   if (!channel || document.getElementsByTagName('parsererror').length) throw new Error('This address did not return a valid RSS or Atom feed.');
+  return channel;
+}
+
+function channelArtwork(channel, base) {
+  const images = Array.from(channel.children).filter(child => child.localName === 'image');
+  const candidates = [
+    ...images.map(image => image.getAttribute('href')),
+    ...images.map(image => text(image, 'url')),
+    text(channel, 'logo'), text(channel, 'icon')
+  ];
+  return candidates.map(value => httpsUrl(value, base)).find(Boolean) ?? '';
+}
+
+export function readArtwork(xml, base, DOM = globalThis.DOMParser) {
+  return channelArtwork(readChannel(xml, DOM), base);
+}
+
+export function parseFeed(xml, base, original, DOM = globalThis.DOMParser) {
+  const channel = readChannel(xml, DOM);
   const title = text(channel, 'title') || 'Untitled podcast';
-  const image = Array.from(channel.children).find(child => child.localName === 'image' && child.hasAttribute('href'));
-  const artwork = httpsUrl(image?.getAttribute('href') || direct(channel, 'image')?.querySelector('url')?.textContent || text(channel, 'logo'), base);
+  const artwork = channelArtwork(channel, base);
   const seen = new Set();
   const episodes = [];
   for (const item of channel.children) {
