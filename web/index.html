@@ -6,12 +6,15 @@
   <meta name="theme-color" content="#111310">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https:; media-src https:; connect-src 'self'; object-src 'none'; base-uri 'none'">
   <title>OnionPod</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/onionpod-32.png">
+  <link rel="apple-touch-icon" href="icons/onionpod-180.png">
+  <link rel="manifest" href="site.webmanifest">
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="app.js"></script>
 </head>
 <body>
   <aside class="sidebar">
-    <div class="brand"><span class="brand-icon" aria-hidden="true">◉</span> OnionPod</div>
+    <div class="brand"><img class="brand-icon" src="icons/onionpod-192.png" alt=""> OnionPod</div>
     <nav aria-label="Main navigation">
       <button data-page="discover" aria-current="page"><span aria-hidden="true">◈</span> Discover</button>
       <button data-page="library"><span aria-hidden="true">▤</span> Library</button>
@@ -27,7 +30,7 @@
   </main>
   <footer class="player" aria-label="Playback">
     <div class="now">
-      <div id="now-cover" class="mini-cover" aria-hidden="true">◉</div>
+      <div id="now-cover" class="mini-cover" aria-hidden="true"><img src="icons/onionpod-192.png" alt=""></div>
       <div><strong id="now-title">Nothing playing</strong><small id="now-show">Choose an episode to start</small></div>
     </div>
     <div class="transport">

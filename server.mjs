@@ -68,7 +68,12 @@ const assets = new Map([
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
-  ['/model.js', ['model.js', 'text/javascript; charset=utf-8']]
+  ['/model.js', ['model.js', 'text/javascript; charset=utf-8']],
+  ['/site.webmanifest', ['site.webmanifest', 'application/manifest+json']],
+  ...[32, 180, 192, 512].map(size => {
+    const file = 'icons/onionpod-' + size + '.png';
+    return ['/' + file, [file, 'image/png']];
+  })
 ]);
 const policy = "default-src 'self'; img-src 'self' https:; media-src https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
 export function serve() {

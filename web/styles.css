@@ -9,7 +9,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 [hidden]{display:none!important}
 .sidebar{width:var(--sidebar);position:fixed;inset:0 auto var(--player) 0;background:#151713;border-right:1px solid var(--line);padding:31px 18px;display:flex;flex-direction:column;z-index:2}
 .brand{display:flex;align-items:center;gap:11px;padding:0 8px;font-size:24px;font-weight:820;letter-spacing:-1px}
-.brand-icon{display:grid;place-items:center;background:var(--accent);color:#17200e;width:35px;height:35px;border-radius:11px;font-size:25px}
+.brand-icon{display:block;width:39px;height:39px;border-radius:10px;object-fit:cover}
 nav{display:grid;gap:7px;margin-top:43px}
 nav button{display:flex;align-items:center;gap:12px;text-align:left;padding:0 12px;border-radius:9px;color:var(--muted);font-size:15px}
 nav button span{width:18px;text-align:center;font-size:20px}
@@ -87,7 +87,7 @@ dialog form{display:grid;gap:12px}
 @media(max-width:730px){
  :root{--player:126px}
  .sidebar{position:sticky;inset:0 0 auto;width:auto;padding:8px 12px;border-right:0;border-bottom:1px solid var(--line)}
- .brand{font-size:21px}.brand-icon{width:29px;height:29px;font-size:20px}
+ .brand{font-size:21px}.brand-icon{width:32px;height:32px}
  nav{display:flex;gap:5px;margin-top:4px;overflow:auto}
  nav button{gap:4px;justify-content:center;flex:1 0 auto;padding:0 6px;font-size:14px}
  .sidebar-bottom{display:none}
