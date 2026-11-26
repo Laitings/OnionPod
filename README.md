@@ -35,7 +35,7 @@ Open **Sync** on the web and Android and sign in with the same password. The fir
 
 **Suggested for you** on Discover compares words in the descriptions and recent episode titles of up to ten followed shows (most recently played first) with shows found by searching the directory for those words. Each card names the followed show it resembles. The matching runs on the device, filters English and Norwegian filler words, and is refreshed daily or when your follows change. The first run reads several dozen feeds, so it can take a while and use noticeable mobile data.
 
-Episodes played to within 30 seconds of the end are tinted blue and marked **Listened**. Use **Hide listened** on a podcast page to leave them out; the choice is saved per device. Seeking back to the very start of an episode also records it this way.
+Episodes played to within 30 seconds of the end are tinted blue and marked **Listened**. Use **Hide listened** on a podcast page to leave them out; the choice is saved per device. The circled check on an episode marks it listened or not listened by hand and syncs like other progress. Seeking back to the very start of an episode also records it as listened.
 
 **Inbox** shows new episodes from followed podcasts, newest first. The first feed check establishes a baseline. Play or dismiss an episode to clear it from this device’s inbox. Opening the podcast clears its badge and keeps the episode in the inbox.
 

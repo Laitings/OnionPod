@@ -669,6 +669,31 @@ function isListened(key) {
   return state.progress[key] === 0 && !(playing && activeKey === key);
 }
 
+// Positions replaced by marking, so an immediate undo can put them back.
+const positionBeforeMark = new Map();
+
+function setListened(episode, listened) {
+  const { key } = episode;
+  const previous = positionBeforeMark.get(key);
+  // A tiny position means "not listened": sync has no way to delete a position.
+  const value = listened ? 0 : previous || 0.001;
+  if (listened) positionBeforeMark.set(key, state.progress[key]);
+  state.progress[key] = value;
+  const details = resumeEpisode(episode);
+  if (details) state.episodeDetails[key] = details;
+  sync.record('progress', key, value, true, details);
+  // Without an earlier position, unmarking must not add it to Continue Listening.
+  if (!listened && !previous) sync.record('dismiss', key, true, true);
+  if (state.current?.key === key) {
+    observedPositions.set(key, position);
+    if (!activeKey) position = value;
+  }
+  if (listened) removeInboxEpisodes([key]);
+  save();
+  render();
+  player();
+}
+
 function insertList(target, episodes, context) {
   if (!episodes.length) {
     target.append(el('p', 'empty', {
@@ -691,7 +716,7 @@ function insertList(target, episodes, context) {
     const copy = el('div', 'episode-copy');
     if (context !== 'feed') info.append(artwork(episode, 'mini-cover', true));
     const date = new Date(episode.date);
-    const progress = state.progress[episode.key];
+    const progress = state.progress[episode.key] >= 1 ? state.progress[episode.key] : 0;
     const meta = [context !== 'feed' ? episode.show : '', !Number.isNaN(date.valueOf()) ? date.toLocaleDateString() : '', progress ? 'Resume at ' + time(progress) : ''];
     if (context === 'downloads') meta.push({ pending: 'Downloading', ready: 'Available offline', failed: 'Download failed' }[episode.downloadState] ?? 'Checking download');
     const details = el('small', '', meta.filter(Boolean).join(' · '));
@@ -724,6 +749,19 @@ function insertList(target, episodes, context) {
     favorite.classList.add('episode-favorite');
     paintFavorite(favorite, favoriteKeys.has(episode.key));
     actions.append(favorite);
+
+    const mark = episodeButton('listened', listened ? 'Mark as not listened' : 'Mark as listened', episode, () => {
+      setListened(episode, !listened);
+      const marks = [...document.querySelectorAll('.episode-mark')];
+      (marks.find(control => control.dataset.episode === episode.key)
+        ?? marks[Math.min(index, marks.length - 1)] ?? $('#listened-filter'))?.focus();
+    });
+    mark.classList.add('episode-mark');
+    mark.dataset.episode = episode.key;
+    mark.setAttribute('aria-pressed', String(listened));
+    // Playback would overwrite the mark at its next checkpoint.
+    mark.disabled = playing && activeKey === episode.key;
+    actions.append(mark);
 
     if (context === 'inbox') {
       const dismiss = episodeButton('close', 'Dismiss', episode, () => {
@@ -1303,6 +1341,7 @@ function checkpoint(force = false) {
   const observed = observedPositions.get(key);
   if (observed !== undefined && Math.abs(observed - position) < (force ? 0.1 : 0.75)) return;
   observedPositions.set(key, position);
+  if (native && !playing && (sync.data.progressAt[key] ?? 0) > (state.nativeProgressAt[key] ?? 0)) return;
   const wasListened = state.progress[key] === 0;
   const value = savedPosition(position, duration);
   state.progress[key] = value;
@@ -1339,6 +1378,9 @@ function player() {
     if (playingCard) paintEpisodeButton(playingCard.control, 'play', 'Play', playingCard.title);
     if (episodeCard) paintEpisodeButton(episodeCard.control, 'pause', 'Pause', episodeCard.title);
     playingCard = episodeCard;
+  }
+  for (const mark of document.querySelectorAll('.episode-mark')) {
+    mark.disabled = playing && mark.dataset.episode === activeKey;
   }
   for (const quickResume of document.querySelectorAll('#continue-listening .continue-action')) {
     quickResume.textContent = playing && quickResume.dataset.episode === activeKey ? 'Pause' : 'Resume';
