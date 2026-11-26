@@ -86,6 +86,7 @@ button.card-category:hover{text-decoration:underline;text-underline-offset:3px}
 .card-follow{display:grid;place-items:center;flex:0 0 44px;height:44px;padding:0;margin-left:auto;border:1px solid var(--line);border-radius:50%;background:#1a3023;color:var(--accent)}
 .card-follow:hover{border-color:var(--accent)}
 .card-follow[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#17200e}
+.card small.reason{color:var(--accent);font-size:12px}
 .continue-meta{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
 .continue-action{margin-left:auto;min-height:40px}
 .continue-remove{position:absolute;z-index:1;top:13px;right:13px;display:grid;place-items:center;width:36px;height:36px;min-height:0;padding:0;border-radius:50%;background:#0b140fd9;border:1px solid #ffffff33}

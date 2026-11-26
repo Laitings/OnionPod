@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { categories, chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, estimateReleasePattern, followedCategories, unfollowedShows, httpsUrl, inboxNewestFirst, mergeShows, parseFeed, podcastCategory, rankedShows, readFeedEpisodes, recentProgress, resumeEpisode, time } from '../web/model.js';
+import { categories, chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, estimateReleasePattern, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, inboxNewestFirst, mergeShows, parseFeed, podcastCategory, rankedShows, readFeedEpisodes, recentProgress, resumeEpisode, time } from '../web/model.js';
 import { feedAddress, publicAddress, serve } from '../server.mjs';
 
 test('Continue Listening chooses the latest unfinished episode across local and synced progress', () => {
@@ -19,18 +19,28 @@ test('Continue Listening chooses the latest unfinished episode across local and 
     { [key('offline')]: 90, [key('current')]: 79 }).map(item => item.key), [key('current'), key('older')]);
 });
 
-test('suggestions follow the most common categories and skip followed shows', () => {
+test('suggestions match what followed shows talk about and skip followed shows', () => {
+  const profile = (title, description) => ({ show: { title }, terms: showTerms({ title, description }) });
   const follows = [
-    { url: 'https://example.com/a', title: 'A', category: 'Comedy', categoryId: 1303 },
-    { url: 'https://example.com/b', title: 'B', category: 'True Crime', categoryId: 1488 },
-    { url: 'https://example.com/c', title: 'C', category: 'True Crime', categoryId: 1488 },
-    { url: 'https://example.com/d', title: 'D' }
+    profile('Sky Watchers', 'UFO sightings, alien encounters and declassified military files. https://example.com'),
+    profile('Sourdough Hour', 'Sourdough bread baking, flour and fermentation.')
   ];
-  assert.deepEqual(followedCategories(follows).map(category => category.id), [1488, 1303]);
+  assert.ok(searchKeywords(follows.map(follow => follow.terms)).includes('ufo sightings'));
+  assert.ok(!follows[0].terms.has('example'));
+  const ranked = rankSimilar(follows, [
+    profile('Disclosure', 'Military files about UFO sightings and alien craft.'),
+    profile('Pitch Side', 'Football transfers and match tactics.'),
+    profile('Crumb', 'Baking sourdough bread with better flour.')
+  ]);
+  assert.deepEqual(ranked.map(item => item.show.title).sort(), ['Crumb', 'Disclosure']);
+  const sourdough = 'Sourdough bread baking and flour.';
+  assert.deepEqual(rankSimilar([{ ...follows[1], language: 'en' }], [
+    profile('Sourdough Hour en español', sourdough), { ...profile('Brot', sourdough), language: 'de' }
+  ]), []);
+  assert.equal(ranked.find(item => item.show.title === 'Crumb').because, 'Sourdough Hour');
   assert.deepEqual(unfollowedShows([
-    { url: 'https://example.com/a', title: 'Moved' }, { url: 'https://example.com/new-b', title: 'b ' },
-    { url: 'https://example.com/e', title: 'E' }
-  ], follows).map(show => show.title), ['E']);
+    { url: 'https://example.com/a', title: 'Moved' }, { url: 'https://example.com/e', title: 'E' }
+  ], [{ url: 'https://example.com/a', title: 'A' }]).map(show => show.title), ['E']);
 });
 
 test('podcast cards retain the primary chart category and support older follows', () => {

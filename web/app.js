@@ -1,4 +1,4 @@
-import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, mergeShows, followedCategories, unfollowedShows, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, resumeEpisode, time } from './model.js';
+import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, mergeShows, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, resumeEpisode, time } from './model.js';
 import { createSync } from './sync.js';
 
 const $ = selector => document.querySelector(selector);
@@ -48,7 +48,8 @@ let explore = readExploreCache();
 let exploreJob = false;
 let exploreRetryAfter = 0;
 const searchCache = new Map();
-const suggestKey = 'onionpod-suggest-v1';
+const suggestKey = 'onionpod-suggest-v2';
+const suggestMaxAge = 24 * 60 * 60_000;
 let suggestions = readSuggestionCache();
 let suggestJob = false;
 let suggestRetryAfter = 0;
@@ -346,7 +347,7 @@ function toggleFollow(show) {
     state.inbox = state.inbox.filter(episode => episode.feed !== url);
     sync.record('follow', url, null, true);
   } else {
-    const { episodes, notesFor, releaseTiming, ...details } = show;
+    const { episodes, notesFor, releaseTiming, reason, ...details } = show;
     details.artwork ||= coverUrls.get(url);
     state.follows.push(details);
     if (episodes) markShowOpened(show);
@@ -371,6 +372,7 @@ function grid(items) {
     const wrapper = el('article', 'podcast-card');
     const card = button('', () => openFeed(item.url, item), 'card');
     card.append(artwork(item, 'cover', true), el('strong', '', item.title), el('small', '', item.author || 'Podcast'));
+    if (item.reason) card.append(el('small', 'reason', item.reason));
     const badge = el('span', 'episode-badge');
     badge.dataset.episodeBadge = item.url;
     badge.hidden = true;
@@ -979,44 +981,92 @@ function readSuggestionCache() {
 function paintSuggestions() {
   const panel = $('#suggested');
   if (!panel || panel.contains(document.activeElement)) return;
-  const categoriesFollowed = followedCategories(state.follows);
-  const shows = categoriesFollowed.length ? unfollowedShows(suggestions.shows, state.follows) : [];
+  const shows = state.follows.length ? unfollowedShows(suggestions.shows, state.follows) : [];
   for (const cover of panel.querySelectorAll('[data-artwork-feed]')) coverObserver.unobserve(cover);
-  panel.hidden = !shows.length;
-  if (!shows.length) return panel.replaceChildren();
+  panel.hidden = !shows.length && !(suggestJob && state.follows.length);
+  if (panel.hidden) return panel.replaceChildren();
   const heading = el('div', 'section-head');
-  heading.append(el('h2', '', 'Suggested for you'),
-    el('small', '', 'Based on ' + suggestions.titles.join(', ')));
+  heading.append(el('h2', '', 'Suggested for you'), el('small', '', 'Matched to what your shows talk about'));
+  if (!shows.length) return panel.replaceChildren(heading, el('p', 'empty', 'Finding shows like yours…'));
   const shelf = grid(shows);
   shelf.classList.add('shelf');
   panel.replaceChildren(heading, shelf);
   updateEpisodeBadges();
 }
 
+// Runs a few requests at a time. Android keeps one of its two fetch threads free for the listener.
+async function gather(items, task) {
+  const results = [];
+  let next = 0;
+  await Promise.all(Array.from({ length: native ? 1 : 3 }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      try { results[index] = await task(items[index]); } catch { /* Skip sources that fail. */ }
+    }
+  }));
+  return results.filter(Boolean);
+}
+
+async function readProfile(show) {
+  const data = await requestSource(show.url);
+  const feed = parseFeed(data.body, data.url, show.url);
+  return {
+    show: {
+      ...show, title: show.title || feed.title, author: show.author || feed.author,
+      artwork: show.artwork || feed.artwork
+    },
+    terms: showTerms(feed),
+    language: feed.language
+  };
+}
+
+// The followed shows listened to most recently describe current taste best.
+function profileFollows() {
+  const listened = new Map();
+  for (const [key, at] of Object.entries(sync.data.progressAt)) {
+    const feed = episodeFeed(key);
+    if (feed && at > (listened.get(feed) ?? 0)) listened.set(feed, at);
+  }
+  return [...state.follows].reverse().sort((a, b) => (listened.get(b.url) ?? 0) - (listened.get(a.url) ?? 0)).slice(0, 10);
+}
+
+async function findSimilarShows() {
+  const follows = await gather(profileFollows(), readProfile);
+  if (!follows.length) throw new Error('The followed feeds could not be read.');
+  const lists = await gather(searchKeywords(follows.map(follow => follow.terms)), term => searchDirectory(term, 20));
+  const found = new Map();
+  for (const list of lists) {
+    for (const [rank, show] of unfollowedShows(list, state.follows, 20).entries()) {
+      const entry = found.get(show.url) ?? { show, score: 0 };
+      entry.score += 1 + (20 - rank) / 40;
+      found.set(show.url, entry);
+    }
+  }
+  const shortlist = [...found.values()].sort((a, b) => b.score - a.score).slice(0, 36).map(entry => entry.show);
+  const candidates = await gather(shortlist, readProfile);
+  return rankSimilar(follows, candidates).map(({ show, because }) => {
+    const { url, title, author, artwork, category, categoryId } = show;
+    return { url, title, author, artwork, category, categoryId, reason: 'Like ' + because };
+  });
+}
+
 async function refreshSuggestions() {
-  const followed = followedCategories(state.follows);
-  const signature = followed.map(category => category.id).join(',');
+  const signature = state.follows.map(show => show.url).sort().join('\n');
   const { relayRequiresLogin } = sync.status();
-  if (!followed.length || state.page !== 'discover' || state.query || document.hidden || !navigator.onLine ||
+  if (!signature || state.page !== 'discover' || state.query || document.hidden || !navigator.onLine ||
       suggestJob || Date.now() < suggestRetryAfter ||
-      (signature === suggestions.signature && Date.now() - suggestions.refreshedAt < exploreMaxAge) ||
+      (signature === suggestions.signature && Date.now() - suggestions.refreshedAt < suggestMaxAge) ||
       (!native && relayRequiresLogin !== false && !sync.data.signedIn)) return;
   suggestJob = true;
+  paintSuggestions();
   try {
-    const results = await Promise.allSettled(followed.map(async category =>
-      category.queries ? (await topicShows(category.queries)).shows : chartShows(category.id)));
-    const lists = results.filter(result => result.status === 'fulfilled').map(result => result.value);
-    if (!lists.length) throw results[0].reason;
-    suggestions = {
-      signature, titles: followed.map(category => category.title),
-      shows: mergeShows(lists, 75), refreshedAt: Date.now()
-    };
+    suggestions = { shows: await findSimilarShows(), signature, refreshedAt: Date.now() };
     try { localStorage.setItem(suggestKey, JSON.stringify(suggestions)); } catch { /* Kept in memory. */ }
-    paintSuggestions();
   } catch (error) {
-    suggestRetryAfter = error.status === 401 ? 0 : Date.now() + 60_000;
+    suggestRetryAfter = Date.now() + 5 * 60_000;
   } finally {
     suggestJob = false;
+    paintSuggestions();
   }
 }
 

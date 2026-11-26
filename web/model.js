@@ -52,17 +52,126 @@ export function podcastCategory(show) {
   return categories.find(category => category.title.toLowerCase() === title.toLowerCase()) ?? null;
 }
 
-// The categories a listener follows most, for suggestions.
-export function followedCategories(follows, limit = 3) {
-  const counts = new Map();
-  for (const show of follows) {
-    const category = podcastCategory(show);
-    if (!category) continue;
-    const entry = counts.get(category.id) ?? { category, count: 0 };
-    entry.count++;
-    counts.set(category.id, entry);
+// Words too common in podcast copy to say anything about a show's subject.
+const stopWords = new Set(('a about above after again against all also am an and any are around as at back be because been ' +
+  'before being best between both but by can come could day did do does doing down during each even every few find first for ' +
+  'free from further get gets go going good great had has have having he her here hers him his how i if in into is it its ' +
+  'join just know last latest like listen listener listeners listening live make makes many may me more most much must my ' +
+  'never new news next no nor not now of off on once one only or other our ours out over own part people really same say ' +
+  'she should show shows so some still story stories such take than that the their theirs them then there these they thing ' +
+  'things this those through time to today too two under until up us use very want was way we week weekly weeks well were ' +
+  'what when where which while who whom why will with world would year years you your yours daily month monthly ' +
+  'podcast podcasts episode episodes season host hosts hosted hosting guest guests subscribe subscription follow apple ' +
+  'spotify amazon youtube patreon instagram twitter facebook tiktok http https www com org net email visit support ' +
+  'sponsor sponsors advertising advertise ads choices privacy policy information megaphone acast audio bonus premium ' +
+  'content series talk talks discuss discusses conversation conversations interview interviews bring brings ' +
+  'og i jeg det at en et den til er som på de med han av ikke der så var meg seg men ett har om vi min mitt ha hadde hun ' +
+  'nå over da ved fra du ut sin dem oss opp man kan hans hvor eller hva skal selv sjøl her alle vil bli ble blitt kunne ' +
+  'inn når være kom noen noe ville dere deres kun ja etter ned skulle denne for deg si sine sitt mot å meget hvorfor ' +
+  'dette disse uten hvordan ingen din ditt blir samme hvilken hvilke sånn inni mellom vår hver hvem vors hvis både bare ' +
+  'enn fordi før mange også slik vært begge siden').split(' '));
+
+// Word and two-word counts from a show's title, description, and recent episode titles.
+export function showTerms(show) {
+  const terms = new Map();
+  const add = (text, weight) => {
+    const clean = String(text ?? '').toLowerCase().replace(/https?:\/\/\S+|www\.\S+|\S+@\S+/g, ' . ');
+    for (const phrase of clean.split(/[^\p{L}\p{N}'’ -]+/u)) {
+      let previous = '';
+      for (const raw of phrase.split(/[\s-]+/)) {
+        const word = raw.replace(/['’]s$/, '').replace(/^['’]+|['’]+$/g, '');
+        if (word.length < 3 && word !== 'ai' || stopWords.has(word) || /^\p{N}+$/u.test(word)) { previous = ''; continue; }
+        terms.set(word, (terms.get(word) ?? 0) + weight);
+        if (previous) terms.set(previous + ' ' + word, (terms.get(previous + ' ' + word) ?? 0) + weight);
+        previous = word;
+      }
+    }
+  };
+  add(show.title, 3);
+  add(show.description, 3);
+  for (const episode of (show.episodes ?? []).slice(0, 30)) add(episode.title, 1);
+  return terms;
+}
+
+// Search phrases: what several followed shows share, then what sets each one apart.
+export function searchKeywords(profiles, limit = 16) {
+  const spread = new Map();
+  for (const terms of profiles) {
+    for (const [term, count] of terms) {
+      const entry = spread.get(term) ?? { shows: 0, score: 0 };
+      entry.shows++;
+      entry.score += Math.min(count, 6) * (term.includes(' ') ? 1.5 : 1);
+      spread.set(term, entry);
+    }
   }
-  return [...counts.values()].sort((a, b) => b.count - a.count).slice(0, limit).map(entry => entry.category);
+  const rank = ([, a], [, b]) => b.score * b.shows - a.score * a.shows;
+  const shared = [...spread].filter(([, entry]) => entry.shows > 1).sort(rank).slice(0, Math.ceil(limit / 3));
+  const picked = new Set(shared.map(([term]) => term));
+  const own = profiles.map(terms => [...terms]
+    .filter(([, count]) => count > 1)
+    .map(([term, count]) => [term, count * (term.includes(' ') ? 1.8 : 1) / spread.get(term).shows ** 2])
+    .sort((a, b) => b[1] - a[1]).map(([term]) => term));
+  for (let round = 0; round < 6 && picked.size < limit; round++) {
+    for (const list of own) {
+      if (list[round] && picked.size < limit) picked.add(list[round]);
+    }
+  }
+  return [...picked];
+}
+
+// Ranks candidates by TF-IDF similarity to the closest followed show.
+export function rankSimilar(follows, candidates, limit = 12) {
+  const all = [...follows, ...candidates];
+  const documents = new Map();
+  for (const { terms } of all) {
+    for (const term of terms.keys()) documents.set(term, (documents.get(term) ?? 0) + 1);
+  }
+  const vector = terms => {
+    const weights = new Map();
+    let length = 0;
+    for (const [term, count] of terms) {
+      const weight = (1 + Math.log(count)) * Math.log(all.length / documents.get(term));
+      weights.set(term, weight);
+      length += weight * weight;
+    }
+    length = Math.sqrt(length) || 1;
+    for (const [term, weight] of weights) weights.set(term, weight / length);
+    return weights;
+  };
+  // Leave out other languages and translated editions of shows already followed.
+  const languages = new Set(follows.map(follow => follow.language).filter(Boolean));
+  const names = follows.map(follow => follow.show.title.toLowerCase());
+  candidates = candidates.filter(({ show, language }) =>
+    !(language && languages.size && !languages.has(language)) &&
+    !names.some(name => show.title.toLowerCase().includes(name)));
+  const sources = follows.map(follow => ({ ...follow, vector: vector(follow.terms) }));
+  const scored = candidates.flatMap(candidate => {
+    const own = vector(candidate.terms);
+    const matches = sources.map(source => {
+      const shared = [];
+      for (const [term, weight] of own) {
+        const other = source.vector.get(term);
+        if (other) shared.push([term, weight * other]);
+      }
+      shared.sort((a, b) => b[1] - a[1]);
+      return { source, shared, score: shared.reduce((sum, [, value]) => sum + value, 0) };
+    }).sort((a, b) => b.score - a.score);
+    const best = matches[0];
+    // One shared word is coincidence, such as a common first name.
+    if (!best || best.shared.length < 3) return [];
+    return [{
+      show: candidate.show, because: best.source.show.title,
+      words: best.shared.slice(0, 3).map(([term]) => term),
+      score: best.score + (matches[1]?.score ?? 0) / 4
+    }];
+  }).sort((a, b) => b.score - a.score);
+  // Keep one followed show from filling the whole row.
+  const cap = Math.max(3, Math.ceil(limit / Math.max(1, follows.length)));
+  const used = new Map();
+  return scored.filter(item => {
+    used.set(item.because, (used.get(item.because) ?? 0) + 1);
+    return used.get(item.because) <= cap;
+  }).slice(0, limit);
 }
 
 export function unfollowedShows(shows, follows, limit = 12) {
@@ -297,7 +406,7 @@ export function parseFeed(xml, base, original, DOM = globalThis.DOMParser, now =
     return episode;
   });
   return {
-    url: original, title, artwork, description: firstDescription(descriptionFields(channel, ['description', 'summary', 'subtitle'])),
+    url: original, title, artwork, language: text(channel, 'language').slice(0, 2).toLowerCase(), description: firstDescription(descriptionFields(channel, ['description', 'summary', 'subtitle'])),
     author: text(channel, 'author') || text(channel, 'creator'), episodes, releaseTiming: releaseTiming(channel, entries, now),
     notesFor(key) {
       const fields = episodeNotes.get(key);
