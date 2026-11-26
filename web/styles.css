@@ -177,13 +177,32 @@ button.card-category:hover{text-decoration:underline;text-underline-offset:3px}
 .speed select{appearance:none;-webkit-appearance:none;field-sizing:content;min-height:36px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);padding:0 27px 0 13px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;text-align-last:center}
 .speed:after{content:'';position:absolute;right:12px;top:50%;width:5px;height:5px;border:solid var(--muted);border-width:0 1.8px 1.8px 0;transform:translateY(-75%) rotate(45deg);pointer-events:none}
 
+.player-close{position:absolute;top:12px;left:12px;display:grid;place-items:center;width:44px;padding:0;border-radius:50%}
+.player-close .icon{width:28px;height:28px}
+.now[role=button]{cursor:pointer}
+.player.expanded{inset:0;height:auto;z-index:5;display:flex;flex-direction:column;align-items:stretch;justify-content:safe center;gap:22px;padding:64px 26px 28px;overflow-y:auto;border-top:0;background:radial-gradient(ellipse at 50% 0%,#1f4a2f 0%,#112018 55%,#0b140f 100%);animation:rise .22s ease-out}
+.player.expanded .now{flex-direction:column;gap:22px;text-align:center}
+.player.expanded .now div:last-child{max-width:100%}
+.player.expanded .mini-cover{flex:0 0 auto;width:min(78vw,42vh,380px);height:min(78vw,42vh,380px);border-radius:20px;font-size:90px;box-shadow:0 20px 50px #0009}
+.player.expanded .now strong{white-space:normal;font-size:20px;line-height:1.3;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3}
+.player.expanded .now small{font-size:15px;margin-top:8px}
+.player.expanded .transport{display:flex;flex-direction:column-reverse;gap:14px}
+.player.expanded .controls{gap:26px}
+.player.expanded .skip{width:60px;height:60px}
+.player.expanded .skip .icon{width:46px;height:46px}
+.player.expanded .skip small{font-size:12px}
+.player.expanded .play{flex-basis:76px;width:76px;height:76px}
+.player.expanded .play .icon{width:34px;height:34px}
+.player.expanded .timeline{font-size:13px}
+.player.expanded .player-tools{justify-self:auto;align-self:center}
+
 /* Dialogs and notices */
 dialog{max-width:min(430px,calc(100% - 30px));width:100%;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:0 24px 70px #000a}
 dialog::backdrop{background:#000b;backdrop-filter:blur(3px)}
 dialog form{display:grid;gap:12px}
 #sync-dialog > :not(:first-child){margin-top:12px}
 .dialog-actions{display:flex;justify-content:flex-end;gap:8px}
-#notice{position:fixed;z-index:4;bottom:calc(var(--player) + var(--tabs) + 12px);right:14px;max-width:calc(100vw - 28px);padding:13px 18px;border-radius:13px;border:1px solid #4f8a52;background:#1c3a26;box-shadow:0 10px 30px #0007;animation:rise .2s ease-out}
+#notice{position:fixed;z-index:6;bottom:calc(var(--player) + var(--tabs) + 12px);right:14px;max-width:calc(100vw - 28px);padding:13px 18px;border-radius:13px;border:1px solid #4f8a52;background:#1c3a26;box-shadow:0 10px 30px #0007;animation:rise .2s ease-out}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}}
 

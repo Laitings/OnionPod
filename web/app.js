@@ -1662,8 +1662,39 @@ $('#rate').onchange = async event => {
 window.addEventListener('pagehide', () => {
   if (playing) checkpoint(true);
 });
-window.addEventListener('popstate', event => showRoute(event.state?.onionPod ?? initialRoute));
+// Android: tapping the mini player opens it full screen. It is a history entry, so Back closes it.
+const playerPanel = $('.player');
+const nowPanel = $('.now');
+function setPlayerExpanded(expanded) {
+  playerPanel.classList.toggle('expanded', expanded);
+  $('#player-close').hidden = !expanded;
+  $('main').inert = $('.sidebar').inert = expanded;
+}
+function openPlayer() {
+  if (!state.current || playerPanel.classList.contains('expanded')) return;
+  history.pushState({ ...history.state, player: true }, '');
+  setPlayerExpanded(true);
+  $('#player-close').focus();
+}
+if (native) {
+  nowPanel.setAttribute('role', 'button');
+  nowPanel.setAttribute('aria-label', 'Open player');
+  nowPanel.tabIndex = 0;
+  nowPanel.addEventListener('click', openPlayer);
+  nowPanel.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPlayer(); }
+  });
+  $('#player-close').addEventListener('click', () => history.back());
+}
+window.addEventListener('popstate', event => {
+  const wasExpanded = playerPanel.classList.contains('expanded');
+  setPlayerExpanded(Boolean(event.state?.player));
+  // Opening or closing the player leaves the page underneath as it was.
+  if (wasExpanded || event.state?.player) return;
+  showRoute(event.state?.onionPod ?? initialRoute);
+});
 if (!history.state?.onionPod) history.replaceState({ onionPod: initialRoute }, '');
+else if (history.state.player) history.replaceState({ onionPod: history.state.onionPod }, '');
 showRoute(history.state.onionPod);
 player();
 if (native) initializeNativeQueue().catch(() => {});
