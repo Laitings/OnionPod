@@ -1,4 +1,4 @@
-import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, mergeShows, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, savedPosition, resumeEpisode, time } from './model.js';
+import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, mergeShows, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, savedPosition, filterEpisodes, queueItems, resumeEpisode, time } from './model.js';
 import { createSync } from './sync.js';
 
 const $ = selector => document.querySelector(selector);
@@ -15,6 +15,7 @@ const state = {
   favorites: saved.favorites ?? [],
   hideListened: Boolean(saved.hideListened),
   hideAbout: Boolean(saved.hideAbout),
+  showSettings: saved.showSettings ?? {}, oldestFirst: Boolean(saved.oldestFirst), episodeQuery: '',
   downloads: saved.downloads ?? [], current: saved.current ?? null, rate: saved.rate ?? 1,
   volume: Number.isFinite(saved.volume) ? Math.max(0, Math.min(1, saved.volume)) : 1,
   muted: Boolean(saved.muted),
@@ -30,6 +31,12 @@ let lastCheckpoint = 0;
 const observedPositions = new Map();
 const episodePlayButtons = new Map();
 let playingCard;
+let queueSignature = signatureOf(saved.queue ?? []);
+let followSignature;
+let sleepAt = 0;
+let sleepAtEnd = false;
+let sleepRequest = 0;
+let notifications = false;
 let generation = 0;
 let noticeTimer;
 let nativeId = 0;
@@ -70,8 +77,11 @@ const sync = createSync({
   saved: saved.syncState,
   call: syncRequest,
   persist: save,
-  local: () => ({ follows: state.follows, progress: state.progress, episodeDetails: state.episodeDetails }),
+  local: () => ({ follows: state.follows, progress: state.progress, episodeDetails: state.episodeDetails, queue: queueItems(state.queue) }),
   collect: native ? async ingest => {
+    // The playback service can change the queue while the app is closed.
+    await initializeNativeQueue();
+    if (applyNativeQueue(await android('queue', { op: 'snapshot' }))) render();
     const pending = await android('local-progress');
     if (!pending.length) return;
     ingest(pending);
@@ -115,9 +125,11 @@ function android(action, data = {}) {
 }
 
 function save() {
-  const { follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout } = state;
+  const { follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout, showSettings, oldestFirst } = state;
+  publishQueue();
+  shareFollows();
   try {
-    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout, syncState: sync.data }));
+    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout, showSettings, oldestFirst, syncState: sync.data }));
     return true;
   } catch {
     notice('OnionPod could not save changes on this device.');
@@ -143,11 +155,43 @@ async function syncRequest(action, data) {
   throw error;
 }
 
+function signatureOf(items) {
+  return items.map(item => item.key).join('\n');
+}
+
+// Web queue edits are recorded here. Android records them from the service's snapshot.
+function publishQueue() {
+  const signature = signatureOf(state.queue);
+  if (native || signature === queueSignature) return;
+  queueSignature = signature;
+  if (sync.data.queueAt) sync.recordQueue(queueItems(state.queue));
+}
+
+function applyQueue(items, at) {
+  // The first sync keeps both queues instead of dropping one.
+  const merge = !sync.data.queueAt && state.queue.length > 0;
+  const next = merge ? queueItems([...items, ...state.queue.filter(own => !items.some(item => item.key === own.key))]) : items;
+  const stamp = merge ? Math.max(Date.now(), at + 1) : at;
+  if (native) {
+    android('queue', { op: 'replace', items: next, at: stamp })
+      .then(snapshot => { if (applyNativeQueue(snapshot)) render(); })
+      .catch(() => {});
+  } else {
+    state.queue = next;
+    queueSignature = signatureOf(next);
+    if (state.page === 'queue') render();
+    $('#queue-count').textContent = next.length || '';
+  }
+  if (merge) sync.recordQueue(next, stamp);
+}
+
 function applySync(changes) {
   let libraryChanged = false;
   let progressChanged = false;
   for (const { type, key, value, at, episode } of changes) {
-    if (type === 'follow') {
+    if (type === 'queue') {
+      if (at > sync.data.queueAt) applyQueue(value, at);
+    } else if (type === 'follow') {
       const existing = state.follows.some(show => show.url === key);
       if (value === null && existing) {
         state.follows = state.follows.filter(show => show.url !== key);
@@ -461,6 +505,7 @@ function applyNativeQueue(snapshot) {
   if (!snapshot || snapshot.revision < 1 || snapshot.revision <= nativeQueueRevision) return false;
   nativeQueueRevision = snapshot.revision;
   state.queue = snapshot.items;
+  if (sync.data.queueAt && snapshot.at > sync.data.queueAt) sync.recordQueue(queueItems(snapshot.items), snapshot.at);
   save();
   return true;
 }
@@ -492,6 +537,143 @@ async function editQueue(op, episode, index) {
     render();
     if (op === 'add') notice('Added to your queue.');
   } catch (error) { notice(error.message); }
+}
+
+const rateFor = feed => state.showSettings[feed]?.rate ?? state.rate;
+const introFor = feed => state.showSettings[feed]?.intro ?? 0;
+
+function shareShowSettings() {
+  if (native) android('show-settings', { defaultRate: state.rate, shows: state.showSettings }).catch(() => {});
+}
+
+function shareFollows() {
+  if (!native) return;
+  const items = state.follows.map(({ url, title }) => ({ url, title }));
+  const signature = JSON.stringify(items);
+  if (signature === followSignature) return;
+  followSignature = signature;
+  android('follows', { items }).catch(() => { followSignature = undefined; });
+}
+
+function changeShowSetting(feed, name, value) {
+  const settings = { ...state.showSettings[feed] };
+  if (value === undefined) delete settings[name];
+  else settings[name] = value;
+  if (Object.keys(settings).length) state.showSettings[feed] = settings;
+  else delete state.showSettings[feed];
+  save();
+  shareShowSettings();
+}
+
+async function applyRate(rate) {
+  try {
+    if (native && activeKey) await android('rate', { rate });
+    else if (audio) audio.playbackRate = rate;
+  } catch (error) { notice(error.message); }
+}
+
+function showPlayback(feed) {
+  const panel = el('div', 'show-playback');
+  const choose = (label, options, current, change) => {
+    const wrapper = el('label', '', label);
+    const select = el('select');
+    for (const [value, text] of options) {
+      const option = el('option', '', text);
+      option.value = value;
+      select.append(option);
+    }
+    select.value = current;
+    select.addEventListener('change', () => change(select.value));
+    wrapper.append(select);
+    panel.append(wrapper);
+  };
+  const rates = [...$('#rate').options].map(option => [option.value, option.textContent]);
+  choose('Speed for this podcast', [['', 'Default'], ...rates], String(state.showSettings[feed]?.rate ?? ''), value => {
+    changeShowSetting(feed, 'rate', value ? Number(value) : undefined);
+    if (state.current?.feed === feed) { $('#rate').value = rateFor(feed); applyRate(rateFor(feed)); }
+  });
+  choose('Default for others', rates, String(state.rate), value => {
+    state.rate = Number(value);
+    save();
+    shareShowSettings();
+    if (state.current && state.showSettings[state.current.feed]?.rate === undefined) {
+      $('#rate').value = state.rate;
+      applyRate(state.rate);
+    }
+  });
+  choose('Skip intro', [['0', 'Off'], ['15', '15 s'], ['30', '30 s'], ['45', '45 s'], ['60', '1 min'],
+    ['90', '1.5 min'], ['120', '2 min'], ['180', '3 min']], String(introFor(feed)),
+  value => changeShowSetting(feed, 'intro', Number(value) || undefined));
+  return panel;
+}
+
+// Shows the chosen sleep timer and, while it counts down, the minutes left.
+function paintSleep(seconds) {
+  const select = $('#sleep');
+  select.closest('.sleep').toggleAttribute('data-on', seconds !== 0);
+  if (document.activeElement === select) return;
+  let running = select.querySelector('[data-running]');
+  if (seconds > 0) {
+    if (!running) {
+      running = el('option');
+      running.dataset.running = '';
+      running.value = 'running';
+      running.hidden = true;
+      select.append(running);
+    }
+    running.textContent = Math.ceil(seconds / 60) + 'm';
+    select.value = 'running';
+  } else {
+    running?.remove();
+    select.value = String(seconds);
+  }
+}
+
+function webSleepRemaining() {
+  if (sleepAtEnd) return -1;
+  return sleepAt ? Math.max(1, Math.ceil((sleepAt - Date.now()) / 1000)) : 0;
+}
+
+function checkWebSleep() {
+  if (sleepAt && Date.now() >= sleepAt) {
+    sleepAt = 0;
+    audio.pause();
+  }
+  paintSleep(webSleepRemaining());
+}
+
+async function setSleep(minutes) {
+  try {
+    if (native) {
+      sleepRequest++;
+      await android('sleep', { minutes });
+    } else {
+      sleepAtEnd = minutes < 0;
+      sleepAt = minutes > 0 ? Date.now() + minutes * 60_000 : 0;
+    }
+    $('#sleep').blur();
+    paintSleep(minutes < 0 ? -1 : minutes * 60);
+  } catch (error) { notice(error.message); }
+}
+
+function notificationButton() {
+  const control = button('', async () => {
+    control.disabled = true;
+    try {
+      const wanted = !notifications;
+      notifications = await android('notifications', { enabled: wanted });
+      notice(notifications ? 'You will be told about new episodes. Checks run every few hours.'
+        : wanted ? 'Allow notifications for OnionPod in Android settings to turn this on.' : 'Notifications turned off.');
+    } catch (error) { notice(error.message); }
+    control.disabled = false;
+    paint();
+  });
+  const paint = () => {
+    control.textContent = notifications ? 'Notifications on' : 'Notify me';
+    control.setAttribute('aria-pressed', String(notifications));
+  };
+  paint();
+  return control;
 }
 
 function findResumeEpisode(key) {
@@ -816,6 +998,53 @@ function insertList(target, episodes, context) {
   target.append(list);
 }
 
+function episodeBrowser(show) {
+  const panel = el('div');
+  const tools = el('div', 'episode-tools');
+  const search = el('input');
+  search.type = 'search';
+  search.maxLength = 100;
+  search.placeholder = 'Search episodes';
+  search.setAttribute('aria-label', 'Search episodes');
+  search.value = state.episodeQuery;
+  const order = button(state.oldestFirst ? 'Oldest first' : 'Newest first', () => {
+    state.oldestFirst = !state.oldestFirst;
+    order.textContent = state.oldestFirst ? 'Oldest first' : 'Newest first';
+    state.episodeLimit = 50;
+    save();
+    paint();
+  });
+  order.title = 'Change the episode order';
+  tools.append(search, order);
+  const list = el('div');
+  const paint = () => {
+    const matches = filterEpisodes(show.episodes, state.episodeQuery, state.oldestFirst,
+      episode => show.notesFor(episode.key));
+    const episodes = state.hideListened ? matches.filter(episode => !isListened(episode.key)) : matches;
+    list.replaceChildren();
+    if (!episodes.length && matches.length) list.append(el('p', 'empty', 'You have listened to every episode here.'));
+    else if (!episodes.length && state.episodeQuery) list.append(el('p', 'empty', 'No episodes match your search.'));
+    else insertList(list, episodes.slice(0, state.episodeLimit), 'feed');
+    if (episodes.length > state.episodeLimit) {
+      const more = button('Show more episodes', () => { state.episodeLimit += 50; paint(); });
+      more.classList.add('more');
+      list.append(more);
+    }
+  };
+  let typing;
+  search.addEventListener('input', () => {
+    clearTimeout(typing);
+    typing = setTimeout(() => {
+      state.episodeQuery = search.value.trim();
+      state.episodeLimit = 50;
+      paint();
+    }, 200);
+  });
+  paint();
+  panel.append(tools, list);
+  return panel;
+}
+
 function render() {
   const page = state.page;
   $('#app-back').hidden = !history.state?.onionPod?.depth || page === 'show' || page === 'category';
@@ -957,8 +1186,8 @@ function render() {
       about.append(heading, text);
       content.append(about);
     }
+    content.append(showPlayback(show.url));
     const heard = show.episodes.filter(episode => isListened(episode.key)).length;
-    const episodes = state.hideListened ? show.episodes.filter(episode => !isListened(episode.key)) : show.episodes;
     const header = el('div', 'section-head episodes-head');
     const count = heard ? show.episodes.length + ' · ' + heard + ' listened' : String(show.episodes.length);
     header.append(el('h2', '', 'Episodes'), el('small', '', count));
@@ -971,16 +1200,13 @@ function render() {
     filter.id = 'listened-filter';
     header.append(filter);
     content.append(header);
-    if (!episodes.length && heard) content.append(el('p', 'empty', 'You have listened to every episode here.'));
-    else insertList(content, episodes.slice(0, state.episodeLimit), 'feed');
-    if (episodes.length > state.episodeLimit) {
-      const more = button('Show more episodes', () => { state.episodeLimit += 50; render(); });
-      more.classList.add('more');
-      content.append(more);
-    }
+    content.append(episodeBrowser(show));
   } else if (page === 'library') {
     const heading = el('div', 'library-heading');
-    heading.append(el('h1', '', 'Your library'), button('Favorites', () => navigate({ page: 'favorites' })));
+    const actions = el('div', 'library-actions');
+    if (native) actions.append(notificationButton());
+    actions.append(button('Favorites', () => navigate({ page: 'favorites' })));
+    heading.append(el('h1', '', 'Your library'), actions);
     content.append(heading, state.follows.length ? grid(state.follows) : el('p', 'empty', 'Follow a podcast to find it here.'));
   } else {
     content.append(el('h1', '', { favorites: 'Favorites', inbox: 'New Episodes', queue: 'Up next', downloads: 'Downloads' }[page]));
@@ -1324,6 +1550,7 @@ function openFeed(value, hint = {}) {
 async function loadFeed(url, hint, version) {
   state.show = null;
   state.episodeLimit = 50;
+  state.episodeQuery = '';
   state.openEpisodeNotes.clear();
   render();
   try {
@@ -1399,6 +1626,7 @@ function player() {
     if (episodeCard) paintEpisodeButton(episodeCard.control, 'pause', 'Pause', episodeCard.title);
     playingCard = episodeCard;
   }
+  if (document.activeElement !== $('#rate')) $('#rate').value = rateFor(current?.feed);
   for (const mark of document.querySelectorAll('.episode-mark')) {
     mark.disabled = playing && mark.dataset.episode === activeKey;
   }
@@ -1428,15 +1656,17 @@ async function start(episode, fromQueue = false) {
       checkpoint(true);
       if (native) {
         await initializeNativeQueue();
-        applyNativeQueue(await android('load', { ...episodeWithResume(episode), rate: state.rate }));
+        applyNativeQueue(await android('load', { ...episodeWithResume(episode), rate: rateFor(episode.feed) }));
         state.current = episode;
         activeKey = episode.key;
       } else {
         state.current = episode;
         activeKey = episode.key;
         audio.src = episode.audio;
-        audio.playbackRate = state.rate;
-        const resume = state.progress[episode.key] ?? 0;
+        audio.playbackRate = rateFor(episode.feed);
+        let resume = state.progress[episode.key] ?? 0;
+        // Starting from the beginning skips the intro chosen for this podcast.
+        if (resume < 1) resume = Math.max(resume, introFor(episode.feed));
         observedPositions.set(episode.key, resume);
         if (resume > 0) audio.currentTime = resume;
         if ('mediaSession' in navigator && 'MediaMetadata' in window) {
@@ -1449,6 +1679,7 @@ async function start(episode, fromQueue = false) {
       endedKey = '';
       duration = 0;
       position = state.progress[episode.key] ?? 0;
+      $('#rate').value = rateFor(episode.feed);
       save(); render(); player();
       if (audio) await audio.play();
       if (!native && !fromQueue && state.queue.some(item => item.key === episode.key)) {
@@ -1468,6 +1699,11 @@ async function advance() {
   if (!current || endedKey === current.key || busy) return;
   endedKey = current.key;
   position = 0; playing = false; checkpoint(true); player();
+  if (sleepAtEnd) {
+    sleepAtEnd = false;
+    paintSleep(0);
+    return;
+  }
   const next = state.queue[0];
   if (next && await start(next, true)) {
     state.queue = state.queue.filter(item => item.key !== next.key);
@@ -1516,8 +1752,10 @@ if (audio) {
     if (polling || busy) return;
     polling = true;
     try {
+      const request = sleepRequest;
       const status = await android('status', { queueRevision: nativeQueueRevision, previousKey: state.current?.key });
       if (busy) return;
+      if (request === sleepRequest) paintSleep(status.sleep ?? 0);
       const queueChanged = applyNativeQueue(status.queue);
       const switched = status.episode && status.key !== state.current?.key;
       if (switched) {
@@ -1650,15 +1888,16 @@ if (!native) {
     applyVolume(true);
   }, { passive: false });
 }
-$('#rate').value = state.rate;
-$('#rate').onchange = async event => {
-  state.rate = Number(event.target.value);
-  save();
-  try {
-    if (native && activeKey) await android('rate', { rate: state.rate });
-    else if (audio) audio.playbackRate = state.rate;
-  } catch (error) { notice(error.message); }
+$('#rate').value = rateFor(state.current?.feed);
+// The player's speed belongs to the podcast that is loaded.
+$('#rate').onchange = event => {
+  const rate = Number(event.target.value);
+  if (state.current?.feed) changeShowSetting(state.current.feed, 'rate', rate);
+  else { state.rate = rate; save(); shareShowSettings(); }
+  applyRate(rate);
 };
+$('#sleep').onchange = event => setSleep(Number(event.target.value));
+if (!native) setInterval(checkWebSleep, 1000);
 window.addEventListener('pagehide', () => {
   if (playing) checkpoint(true);
 });
@@ -1708,7 +1947,15 @@ if (!history.state?.onionPod) history.replaceState({ onionPod: initialRoute }, '
 else if (history.state.player) history.replaceState({ onionPod: history.state.onionPod }, '');
 showRoute(history.state.onionPod);
 player();
-if (native) initializeNativeQueue().catch(() => {});
+if (native) {
+  initializeNativeQueue().catch(() => {});
+  shareShowSettings();
+  shareFollows();
+  android('notifications').then(enabled => {
+    notifications = enabled;
+    if (state.page === 'library') render();
+  }).catch(() => {});
+}
 refreshFollowedFeeds();
 setInterval(refreshFollowedFeeds, feedCheckInterval);
 setInterval(refreshExplore, exploreMaxAge);

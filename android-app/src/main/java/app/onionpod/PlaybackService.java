@@ -40,6 +40,7 @@ public final class PlaybackService extends MediaSessionService {
     private final Runnable advance = this::advanceQueue;
     private final Runnable checkpoint = new Runnable() {
         @Override public void run() {
+            if (SleepTimer.expire()) player.pause();
             saveProgress();
             if (SystemClock.elapsedRealtime() - lastUpload >= 20_000) flushProgress();
             handler.postDelayed(this, 3000);
@@ -133,6 +134,8 @@ public final class PlaybackService extends MediaSessionService {
     private void play(JSONObject episode, float rate) throws Exception {
         MediaItem item = EpisodeMedia.playable(this, episode);
         long position = PlaybackProgress.chooseResume(this, item.mediaId, episode);
+        // Starting an episode from the beginning skips the intro chosen for its podcast.
+        if (position < 1000) position = Math.max(position, ShowSettings.introMs(this, episode.getString("feed")));
         saveProgress();
         queue.remove(item.mediaId);
         player.setMediaItem(item, position);
@@ -143,9 +146,13 @@ public final class PlaybackService extends MediaSessionService {
 
     private void advanceQueue() {
         if (player.getPlaybackState() != Player.STATE_ENDED || !player.getPlayWhenReady()) return;
+        if (SleepTimer.consumeEnd()) {
+            player.pause();
+            return;
+        }
         try {
             JSONObject next = queue.first();
-            if (next != null) play(next, player.getPlaybackParameters().speed);
+            if (next != null) play(next, ShowSettings.rate(this, next.getString("feed")));
         } catch (Exception error) {
             android.util.Log.w("OnionPod", "Could not start the next queued episode.", error);
         }

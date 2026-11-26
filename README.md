@@ -29,7 +29,7 @@ docker compose -f /volume1/docker/onionpod/compose.yaml exec SERVICE node sync-a
 
 Save the generated password in a password manager. Using `node sync-admin.mjs --rotate` replaces the password and revokes all sessions without deleting follows or progress. The app has no public account registration.
 
-Open **Sync** on the web and Android and sign in with the same password. The first sign-in imports existing follows and listening positions. Both apps keep local changes and retry when they can reach the server. Android also uploads playback checkpoints while its playback service runs. The latest dated update wins, so a recent rewind or unfollow is preserved. Queue, download files, and new episode badge counts stay on each device.
+Open **Sync** on the web and Android and sign in with the same password. The first sign-in imports existing follows and listening positions. Both apps keep local changes and retry when they can reach the server. Android also uploads playback checkpoints while its playback service runs. The latest dated update wins, so a recent rewind or unfollow is preserved. The queue syncs too: the most recently changed queue replaces the other, except on the first sync, which combines them. Android sends queue changes made while it was closed when you next open it. Download files and new episode badge counts stay on each device. Update the sync server before the apps, because an older server rejects queue data and pauses sync.
 
 **Continue Listening** on Discover resumes your most recent unfinished episode. With sync enabled, it includes playback from the other device. Tap the × on a card to remove it from the list on both devices; your position is kept, and the episode returns if you play it again. Update the sync server before the Android app when upgrading, because an older server rejects removals and pauses sync. Existing listening positions are kept when the server adds episode metadata to its database.
 
@@ -38,6 +38,14 @@ Open **Sync** on the web and Android and sign in with the same password. The fir
 Episodes played to within 30 seconds of the end are tinted blue and marked **Listened**. Use **Hide listened** on a podcast page to leave them out; the choice is saved per device. The circled check on an episode marks it listened or not listened by hand and syncs like other progress. Seeking back to the very start of an episode also records it as listened.
 
 On a podcast page, the − / + button beside **About the podcast** hides or shows the description. The choice is saved per device and applies to every podcast.
+
+**Sleep timer** (moon, in the player) pauses after 15 to 60 minutes or at the end of the episode.
+
+Each podcast page sets its own **speed** and **intro skip**, saved per device. Changing speed in the player also changes it for the playing podcast; **Default for others** on any podcast page sets the speed for podcasts without their own. The intro is skipped when an episode starts from the beginning.
+
+Podcast pages can **search** episode titles and notes and switch between **newest** and **oldest first**.
+
+On Android, **Library → Notify me** turns on notifications for new episodes from followed shows. A system job checks about every four hours when there is a network, so alerts are not immediate, and Android may delay them further to save battery.
 
 **Inbox** shows new episodes from followed podcasts, newest first. The first feed check establishes a baseline. Play or dismiss an episode to clear it from this device’s inbox. Opening the podcast clears its badge and keeps the episode in the inbox.
 

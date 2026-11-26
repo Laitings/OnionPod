@@ -3,6 +3,7 @@ package app.onionpod;
 import android.app.DownloadManager;
 import android.content.ComponentName;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.media.AudioManager;
@@ -17,6 +18,8 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
@@ -50,10 +53,17 @@ public final class MainActivity extends ComponentActivity {
     private ListenableFuture<MediaController> controllerFuture;
     private MediaController player;
     private WebView view;
+    private ActivityResultLauncher<String> notificationPermission;
+    private JavaScriptReplyProxy permissionReply;
+    private int permissionRequest;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
+        notificationPermission = registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
+            if (permissionReply != null) replyNotifications(permissionRequest, granted, permissionReply);
+            permissionReply = null;
+        });
         syncTransport = new SyncTransport(this);
         queue = new PlaybackQueue(this);
         WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
@@ -99,6 +109,10 @@ public final class MainActivity extends ComponentActivity {
                         JSONObject input = new JSONObject(message.getData());
                         if (input.optString("action").equals("load")) {
                             loadEpisode(input, reply);
+                            return;
+                        }
+                        if (input.optString("action").equals("notifications")) {
+                            notifications(input, reply);
                             return;
                         }
                         Runnable handle = () -> {
@@ -159,6 +173,30 @@ public final class MainActivity extends ComponentActivity {
         }, commandResult -> runOnUiThread(commandResult));
     }
 
+    private void notifications(JSONObject input, JavaScriptReplyProxy reply) throws Exception {
+        int id = input.getInt("id");
+        JSONObject data = input.getJSONObject("data");
+        if (!data.has("enabled")) {
+            // Reschedules the check if the system dropped it, and reports a revoked permission as off.
+            boolean enabled = NewEpisodes.enabled(this)
+                && getSystemService(android.app.NotificationManager.class).areNotificationsEnabled();
+            if (enabled) NewEpisodes.setEnabled(this, true);
+            reply.postMessage(new JSONObject().put("id", id).put("value", enabled).toString());
+        } else if (data.getBoolean("enabled") && Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            permissionRequest = id;
+            permissionReply = reply;
+            notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS);
+        } else replyNotifications(id, data.getBoolean("enabled"), reply);
+    }
+
+    private void replyNotifications(int id, boolean enabled, JavaScriptReplyProxy reply) {
+        try {
+            NewEpisodes.setEnabled(this, enabled);
+            reply.postMessage(new JSONObject().put("id", id).put("value", enabled).toString());
+        } catch (Exception ignored) { /* The web layer times out and reports it. */ }
+    }
+
     private Object execute(JSONObject request) throws Exception {
         String action = request.getString("action");
         JSONObject data = request.getJSONObject("data");
@@ -178,6 +216,18 @@ public final class MainActivity extends ComponentActivity {
             return true;
         }
         if (action.equals("queue")) return queue.edit(data);
+        if (action.equals("show-settings")) {
+            ShowSettings.save(this, data);
+            return true;
+        }
+        if (action.equals("follows")) {
+            NewEpisodes.setFollows(this, data.getJSONArray("items"));
+            return true;
+        }
+        if (action.equals("sleep")) {
+            SleepTimer.set(data.getInt("minutes"));
+            return true;
+        }
         if (action.equals("fetch")) return fetch(data.getString("url"));
         if (action.equals("download") || action.equals("offline") || action.equals("remove")) {
             return downloads(action, data);
@@ -206,7 +256,8 @@ public final class MainActivity extends ComponentActivity {
                     .put("started", player.isPlaying())
                     .put("playing", player.getPlayWhenReady() && player.getPlaybackState() != Player.STATE_ENDED && player.getPlayerError() == null)
                     .put("ended", player.getPlaybackState() == Player.STATE_ENDED)
-                    .put("error", player.getPlayerError() == null ? "" : "This episode could not be played.");
+                    .put("error", player.getPlayerError() == null ? "" : "This episode could not be played.")
+                    .put("sleep", SleepTimer.remaining());
                 if (queue.revision() != data.optInt("queueRevision", -1)) status.put("queue", queue.snapshot());
                 String previousKey = data.optString("previousKey");
                 if (active != null && !previousKey.isEmpty() && !previousKey.equals(active.mediaId)) {

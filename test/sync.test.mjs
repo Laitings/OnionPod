@@ -94,6 +94,20 @@ test('web and Android sync share durable state, with protected routes and revoke
   }
 });
 
+test('the newest queue wins and invalid queues are rejected', () => {
+  const store = new SyncStore(':memory:');
+  try {
+    const item = { key: episode, feed, audio: 'https://example.com/episode.mp3', title: 'First', show: 'Show', artwork: '', date: '' };
+    const now = Date.now();
+    const queue = { type: 'queue', key: 'queue', value: [item], at: now };
+    store.exchange(0, validateExchange({ cursor: 0, changes: [queue] }).changes);
+    const older = { ...queue, value: [], at: now - 1000 };
+    assert.deepEqual(store.exchange(0, validateExchange({ cursor: 0, changes: [older] }).changes).accepted, [queue]);
+    assert.throws(() => validateExchange({ cursor: 0, changes: [{ ...queue, value: [{ ...item, audio: 'nope' }] }] }));
+    assert.throws(() => validateExchange({ cursor: 0, changes: [{ ...queue, value: Array(101).fill(item) }] }));
+  } finally { store.close(); }
+});
+
 test('removing from Continue Listening is accepted and shared', () => {
   const store = new SyncStore(':memory:');
   try {

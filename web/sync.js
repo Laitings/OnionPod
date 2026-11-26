@@ -1,9 +1,10 @@
-import { episodeFeed, httpsUrl, resumeEpisode } from './model.js';
+import { episodeFeed, httpsUrl, queueItems, resumeEpisode } from './model.js';
 
 const recordId = ({ type, key }) => JSON.stringify([type, key]);
 
 function recordValue(type, key, value) {
   if (typeof key !== 'string' || !key || key.length > 4096) return undefined;
+  if (type === 'queue') return key === 'queue' && Array.isArray(value) ? queueItems(value) : undefined;
   if (type === 'dismiss') return episodeFeed(key) && value === true ? true : undefined;
   if (type === 'progress') {
     return episodeFeed(key) && Number.isFinite(value) && value >= 0 && value <= 604800 ? value : undefined;
@@ -19,7 +20,8 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
   const data = {
     cursor: saved?.cursor ?? 0, initialized: Boolean(saved?.initialized),
     signedIn: Boolean(saved?.signedIn), pending: saved?.pending ?? {}, progressAt: saved?.progressAt ?? {},
-    dismissedAt: saved?.dismissedAt ?? {}
+    dismissedAt: saved?.dismissedAt ?? {},
+    queueAt: saved?.queueAt ?? 0
   };
   let enabled = null;
   let relayRequiresLogin = null;
@@ -41,6 +43,7 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
     if (!previous || at >= previous.at) data.pending[id] = change;
     if (type === 'progress') data.progressAt[key] = Math.max(data.progressAt[key] ?? 0, at);
     if (type === 'dismiss') data.dismissedAt[key] = Math.max(data.dismissedAt[key] ?? 0, at);
+    if (type === 'queue') data.queueAt = Math.max(data.queueAt, at);
   }
 
   function record(type, key, value, urgent = false, episode) {
@@ -48,6 +51,13 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
     lastTimestamp = Math.max(Date.now(), lastTimestamp + 1, last + 1);
     store(type, key, value, lastTimestamp, episode);
     schedule(urgent ? 300 : 3000);
+  }
+
+  // Records the queue with the time it changed, which on Android may be while the app was closed.
+  function recordQueue(items, at = Math.max(Date.now(), data.queueAt + 1)) {
+    if (at <= data.queueAt) return;
+    store('queue', 'queue', items, at);
+    schedule(500);
   }
 
   function ingest(progress) {
@@ -125,6 +135,7 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
         data.initialized = true;
         persist();
       }
+      let receivedQueue = false;
       for (let page = 0; page < 15; page++) {
         const sent = Object.values(data.pending).slice(0, 50);
         const result = await call('exchange', { cursor: data.cursor, changes: sent });
@@ -140,11 +151,19 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
           if (change.type === 'dismiss') data.dismissedAt[change.key] = change.at;
         }
         data.cursor = result.cursor;
+        receivedQueue ||= applicable.some(change => change.type === 'queue');
+        // apply merges a first remote queue while queueAt is still zero, then sets it.
         apply(applicable);
+        for (const change of applicable) {
+          if (change.type === 'queue') data.queueAt = Math.max(data.queueAt, change.at);
+        }
         persist();
         if (!result.more && !Object.keys(data.pending).length) break;
         if (page === 14) schedule(1000);
       }
+      // The first queue on this account is published after anything remote has arrived.
+      const first = local().queue;
+      if (!data.queueAt && !receivedQueue && first?.length) recordQueue(first);
       message = '';
     } catch (error) {
       if (error.status === 401) {
@@ -158,5 +177,5 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
     paint();
   }
 
-  return { data, session, login, logout, record, run: exchange, schedule, status: () => ({ enabled, relayRequiresLogin, message }) };
+  return { data, session, login, logout, record, recordQueue, run: exchange, schedule, status: () => ({ enabled, relayRequiresLogin, message }) };
 }

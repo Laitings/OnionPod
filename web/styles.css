@@ -133,6 +133,14 @@ button.card-category:hover{text-decoration:underline;text-underline-offset:3px}
 .listened-mark{color:#78c7d6;font-weight:700}
 .episodes-head{align-items:center}
 .episodes-head .outline{margin-left:auto;min-height:40px}
+.show-playback{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;margin:0 0 28px;color:var(--muted);font-size:14px}
+.show-playback label{display:flex;align-items:center;gap:8px}
+.show-playback select{min-height:40px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);padding:0 10px;font-weight:700}
+.episode-tools{display:flex;gap:8px;margin-bottom:12px}
+.episode-tools input:not([type=range]){flex:1;width:0;min-height:44px;border-radius:999px}
+.episode-tools .outline{min-height:44px}
+.library-actions{display:flex;flex-wrap:wrap;gap:8px}
+.outline[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
 .episode[data-active]{border-color:#7fbf63;background:#172c1d}
 .episode-info{display:flex;align-items:center;gap:13px;flex:1 1 220px;min-width:0}
 .episode-copy{min-width:0}
@@ -196,6 +204,11 @@ button.card-category:hover{text-decoration:underline;text-underline-offset:3px}
 .player.expanded .timeline{font-size:13px}
 .player.expanded .player-tools{justify-self:auto;align-self:center}
 
+.sleep>.icon{position:absolute;left:11px;top:50%;width:15px;height:15px;transform:translateY(-50%);color:var(--muted);pointer-events:none}
+.speed.sleep select{padding-left:31px}
+.sleep[data-on]>.icon{color:var(--accent)}
+.sleep[data-on] select{border-color:var(--accent);color:var(--accent)}
+
 /* Dialogs and notices */
 dialog{max-width:min(430px,calc(100% - 30px));width:100%;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:0 24px 70px #000a}
 dialog::backdrop{background:#000b;backdrop-filter:blur(3px)}
@@ -252,5 +265,6 @@ dialog form{display:grid;gap:12px}
  .category-mark{flex-basis:34px;height:34px;font-size:18px;border-radius:10px}
  .topbar-start{gap:8px}
  .hero h1{font-size:30px}
+ .volume{display:none}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

@@ -15,10 +15,13 @@ final class PlaybackQueue {
 
     int revision() { return prefs.getInt("revision", 0); }
 
+    /** When the contents last changed, used to order queue sync between devices. */
+    private long changedAt() { return prefs.getLong("at", 0); }
+
     private JSONArray items() throws JSONException { return new JSONArray(prefs.getString("items", "[]")); }
 
     JSONObject snapshot() throws JSONException {
-        return new JSONObject().put("revision", revision()).put("items", items());
+        return new JSONObject().put("revision", revision()).put("items", items()).put("at", changedAt());
     }
 
     JSONObject first() throws JSONException { return items().optJSONObject(0); }
@@ -61,6 +64,20 @@ final class PlaybackQueue {
                     save(items);
                 }
                 break;
+            case "replace":
+                // A synced queue only applies when it is newer than the last change on this phone.
+                long at = command.getLong("at");
+                if (at <= changedAt()) break;
+                JSONArray synced = command.getJSONArray("items");
+                JSONArray replacement = new JSONArray();
+                for (int i = 0; i < synced.length(); i++) {
+                    try { append(replacement, EpisodeMedia.validate(synced.getJSONObject(i))); }
+                    catch (Exception ignored) { /* Skip an episode this phone cannot play. */ }
+                }
+                save(replacement, at);
+                break;
+            case "snapshot":
+                break;
             default: throw new IllegalArgumentException("Unknown queue operation.");
         }
         return snapshot();
@@ -79,7 +96,9 @@ final class PlaybackQueue {
         return -1;
     }
 
-    private void save(JSONArray items) {
-        prefs.edit().putString("items", items.toString()).putInt("revision", revision() + 1).apply();
+    private void save(JSONArray items) { save(items, Math.max(System.currentTimeMillis(), changedAt() + 1)); }
+
+    private void save(JSONArray items, long at) {
+        prefs.edit().putString("items", items.toString()).putLong("at", at).putInt("revision", revision() + 1).apply();
     }
 }

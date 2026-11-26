@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
-import { episodeFeed, httpsUrl, resumeEpisode } from './web/model.js';
+import { episodeFeed, httpsUrl, queueItems, queueLimit, resumeEpisode } from './web/model.js';
 
 const derive = promisify(scrypt);
 const sessionAge = 90 * 24 * 60 * 60;
@@ -137,6 +137,10 @@ export function validateExchange(body) {
         const episode = resumeEpisode(change.episode, key);
         return episode ? { type, key, value, at, episode } : { type, key, value, at };
       }
+    }
+    if (type === 'queue' && key === 'queue' && Array.isArray(value) && value.length <= queueLimit) {
+      const items = queueItems(value);
+      if (items.length === value.length) return { type, key, value: items, at };
     }
     if (type === 'dismiss' && value === true && episodeFeed(key)) return { type, key, value, at };
     if (type === 'follow' && key.length <= 2048 && httpsUrl(key) === key) {

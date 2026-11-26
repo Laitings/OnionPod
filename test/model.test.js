@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { categories, chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, estimateReleasePattern, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, inboxNewestFirst, mergeShows, parseFeed, podcastCategory, rankedShows, readFeedEpisodes, recentProgress, resumeEpisode, savedPosition, time } from '../web/model.js';
+import { categories, chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, estimateReleasePattern, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, inboxNewestFirst, mergeShows, parseFeed, podcastCategory, rankedShows, readFeedEpisodes, recentProgress, resumeEpisode, savedPosition, filterEpisodes, queueItems, time } from '../web/model.js';
 import { feedAddress, publicAddress, serve } from '../server.mjs';
 
 test('Continue Listening chooses the latest unfinished episode across local and synced progress', () => {
@@ -48,6 +48,19 @@ test('the last 30 seconds count as listened', () => {
   assert.equal(savedPosition(1770, 1800), 0);
   assert.equal(savedPosition(45, 60), 45);
   assert.equal(savedPosition(45, 0), 45);
+});
+
+test('episodes can be searched and ordered, and synced queues keep only playable items', () => {
+  const episodes = [
+    { title: 'Bob Lazar returns', date: '2026-01-02', key: 'b' }, { title: 'Pilot', date: '2026-01-01', key: 'a' },
+    { title: 'Radar', date: '2026-01-03', key: 'c' }
+  ];
+  assert.deepEqual(filterEpisodes(episodes, '', true).map(item => item.key), ['a', 'b', 'c']);
+  assert.deepEqual(filterEpisodes(episodes, '  lazar BOB', false).map(item => item.key), ['b']);
+  assert.deepEqual(filterEpisodes(episodes, 'tapes', false, item => item.key === 'a' ? 'Lost tapes' : '').map(item => item.key), ['a']);
+  const feed = 'https://example.com/feed.xml';
+  const good = { key: JSON.stringify([feed, '1']), feed, audio: 'https://example.com/1.mp3', title: 'One' };
+  assert.deepEqual(queueItems([good, { ...good, audio: 'http://example.com/1.mp3' }, null]).map(item => item.title), ['One']);
 });
 
 test('podcast cards retain the primary chart category and support older follows', () => {

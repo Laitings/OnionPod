@@ -30,6 +30,7 @@
     <symbol id="i-listened" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.2 2.4 2.4 4.6-4.8"/></symbol>
     <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
     <symbol id="i-collapse" viewBox="0 0 24 24"><path d="m5.5 9.5 6.5 6.5 6.5-6.5"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></symbol>
     <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 19.5S4 15 4 9.2A4.2 4.2 0 0 1 12 7a4.2 4.2 0 0 1 8 2.2C20 15 12 19.5 12 19.5z"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
@@ -80,6 +81,10 @@
         <button id="mute" type="button" aria-label="Mute" aria-pressed="false" title="Mute"><svg class="icon" aria-hidden="true"><use href="#i-volume"></use></svg></button>
         <input id="volume" aria-label="Volume" type="range" min="0" max="1" step="0.01" value="1">
       </div>
+      <label class="speed sleep"><span class="sr-only">Sleep timer</span><svg class="icon" aria-hidden="true"><use href="#i-moon"></use></svg><select id="sleep" aria-label="Sleep timer">
+        <option value="0" selected>Off</option><option value="15">15m</option><option value="30">30m</option>
+        <option value="45">45m</option><option value="60">60m</option><option value="-1">End</option>
+      </select></label>
       <label class="speed"><span class="sr-only">Playback speed</span><select id="rate" aria-label="Playback speed">
         <option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option>
         <option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>

@@ -450,6 +450,23 @@ export function savedPosition(position, duration) {
   return duration > 60 && duration - position <= 30 ? 0 : position;
 }
 
+export const queueLimit = 100;
+
+// The synced form of a queue: complete, playable episodes only.
+export function queueItems(items) {
+  return Array.isArray(items) ? items.map(item => resumeEpisode(item)).filter(Boolean).slice(0, queueLimit) : [];
+}
+
+export function filterEpisodes(episodes, query, oldestFirst, notes = () => '') {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = words.length ? episodes.filter(episode => {
+    const text = (episode.title + ' ' + notes(episode)).toLowerCase();
+    return words.every(word => text.includes(word));
+  }) : [...episodes];
+  const when = episode => Date.parse(episode.date) || 0;
+  return matches.sort((a, b) => oldestFirst ? when(a) - when(b) : when(b) - when(a));
+}
+
 export function recentProgress(progress, timestamps, currentKey, localTimestamps = {}, dismissedAt = {}) {
   return Object.entries(progress)
     .filter(([key, position]) => Number.isFinite(position) && position > 0 && episodeFeed(key))
