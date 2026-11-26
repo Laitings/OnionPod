@@ -67,7 +67,7 @@ public final class MainActivity extends ComponentActivity {
             });
         }
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.rgb(21, 23, 19));
+        root.setBackgroundColor(Color.rgb(14, 26, 19));
         if (Build.VERSION.SDK_INT >= 30) {
             getWindow().setDecorFitsSystemWindows(false);
             root.setOnApplyWindowInsetsListener((element, insets) -> {
@@ -78,7 +78,7 @@ public final class MainActivity extends ComponentActivity {
             });
         }
         view = new WebView(this);
-        view.setBackgroundColor(Color.rgb(17, 19, 16));
+        view.setBackgroundColor(Color.rgb(11, 20, 15));
         view.getSettings().setJavaScriptEnabled(true);
         view.getSettings().setDomStorageEnabled(true);
         view.getSettings().setAllowFileAccess(false);
