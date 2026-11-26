@@ -115,7 +115,11 @@ button.card-category:hover{text-decoration:underline;text-underline-offset:3px}
 .show-release small{font-size:.88em}
 .show-release time+small{display:block}
 .show-description{margin:0 0 30px;max-width:72ch}
-.about-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.about-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.about-head h2{margin:0}
+.about-head .episode-icon{position:relative;width:28px;height:28px;min-height:0;flex:0 0 28px}
+.about-head .episode-icon:after{content:'';position:absolute;inset:-8px}
+.about-head .icon{width:16px;height:16px;stroke-width:3.4}
 .about-head .episode-icon[aria-expanded=true]{color:var(--muted);background:var(--surface);border-color:var(--line)}
 .show-description p{color:var(--muted);line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}
 .library-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px}
