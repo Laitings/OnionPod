@@ -61,7 +61,7 @@ On macOS or Linux use `./gradlew` in place of `.\gradlew.bat`. The debug APK is 
 
 Android packages the shared interface locally and accesses feeds directly. Media3 runs playback in a service and exposes Android media controls. When an episode finishes, the service starts the next queued episode even if the app is in the background or the screen is locked. Downloaded episodes play from their local file. Download episodes from their episode lists and play completed downloads from the Downloads tab.
 
-Tap the artwork or title in the Android mini player to open a full-screen player. Use the arrow at the top or the Back button to close it.
+Tap the artwork or title in the Android mini player to open a full-screen player. Tap the large artwork to open the podcast’s page. Use the arrow at the top or the Back button to close the player.
 
 When Android pauses playback after an audio output disconnects, OnionPod rewinds by five seconds so you hear that part again when you press Play. Alerts that temporarily take audio focus resume playback at the same position when the alert releases focus.
 

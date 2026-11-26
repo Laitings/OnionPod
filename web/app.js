@@ -1668,6 +1668,7 @@ const nowPanel = $('.now');
 function setPlayerExpanded(expanded) {
   playerPanel.classList.toggle('expanded', expanded);
   $('#player-close').hidden = !expanded;
+  nowPanel.setAttribute('aria-label', expanded ? 'Go to podcast' : 'Open player');
   $('main').inert = $('.sidebar').inert = expanded;
 }
 function openPlayer() {
@@ -1676,13 +1677,23 @@ function openPlayer() {
   setPlayerExpanded(true);
   $('#player-close').focus();
 }
+// Close the player first so Back from the podcast returns to the page, not the player.
+function openCurrentPodcast() {
+  const { key, feed = episodeFeed(key), show, artwork } = state.current;
+  window.addEventListener('popstate', () => openFeed(feed, { title: show, artwork }), { once: true });
+  history.back();
+}
+function tapNow(onArtwork) {
+  if (!playerPanel.classList.contains('expanded')) openPlayer();
+  else if (onArtwork) openCurrentPodcast();
+}
 if (native) {
   nowPanel.setAttribute('role', 'button');
   nowPanel.setAttribute('aria-label', 'Open player');
   nowPanel.tabIndex = 0;
-  nowPanel.addEventListener('click', openPlayer);
+  nowPanel.addEventListener('click', event => tapNow(Boolean(event.target.closest('.mini-cover'))));
   nowPanel.addEventListener('keydown', event => {
-    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPlayer(); }
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); tapNow(true); }
   });
   $('#player-close').addEventListener('click', () => history.back());
 }
