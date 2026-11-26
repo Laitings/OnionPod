@@ -317,10 +317,12 @@ export function resumeEpisode(value, key = value?.key) {
   };
 }
 
-export function recentProgress(progress, timestamps, currentKey, localTimestamps = {}) {
+export function recentProgress(progress, timestamps, currentKey, localTimestamps = {}, dismissedAt = {}) {
   return Object.entries(progress)
     .filter(([key, position]) => Number.isFinite(position) && position > 0 && episodeFeed(key))
     .map(([key, position]) => ({ key, position, at: Math.max(timestamps[key] ?? 0, localTimestamps[key] ?? 0) }))
+    // A removed episode stays hidden until it is played again.
+    .filter(({ key, at }) => !(dismissedAt[key] >= at))
     .sort((a, b) => b.at - a.at || Number(b.key === currentKey) - Number(a.key === currentKey));
 }
 

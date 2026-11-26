@@ -4,6 +4,7 @@ const recordId = ({ type, key }) => JSON.stringify([type, key]);
 
 function recordValue(type, key, value) {
   if (typeof key !== 'string' || !key || key.length > 4096) return undefined;
+  if (type === 'dismiss') return episodeFeed(key) && value === true ? true : undefined;
   if (type === 'progress') {
     return episodeFeed(key) && Number.isFinite(value) && value >= 0 && value <= 604800 ? value : undefined;
   }
@@ -17,7 +18,8 @@ function recordValue(type, key, value) {
 export function createSync({ saved, call, persist, local, collect, apply, paint }) {
   const data = {
     cursor: saved?.cursor ?? 0, initialized: Boolean(saved?.initialized),
-    signedIn: Boolean(saved?.signedIn), pending: saved?.pending ?? {}, progressAt: saved?.progressAt ?? {}
+    signedIn: Boolean(saved?.signedIn), pending: saved?.pending ?? {}, progressAt: saved?.progressAt ?? {},
+    dismissedAt: saved?.dismissedAt ?? {}
   };
   let enabled = null;
   let relayRequiresLogin = null;
@@ -38,10 +40,11 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
     const previous = data.pending[id];
     if (!previous || at >= previous.at) data.pending[id] = change;
     if (type === 'progress') data.progressAt[key] = Math.max(data.progressAt[key] ?? 0, at);
+    if (type === 'dismiss') data.dismissedAt[key] = Math.max(data.dismissedAt[key] ?? 0, at);
   }
 
   function record(type, key, value, urgent = false, episode) {
-    const last = type === 'progress' ? data.progressAt[key] ?? 0 : 0;
+    const last = type === 'follow' ? 0 : data.progressAt[key] ?? 0;
     lastTimestamp = Math.max(Date.now(), lastTimestamp + 1, last + 1);
     store(type, key, value, lastTimestamp, episode);
     schedule(urgent ? 300 : 3000);
@@ -134,6 +137,7 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
         const applicable = [...changes.values()].filter(change => !data.pending[recordId(change)]);
         for (const change of applicable) {
           if (change.type === 'progress') data.progressAt[change.key] = change.at;
+          if (change.type === 'dismiss') data.dismissedAt[change.key] = change.at;
         }
         data.cursor = result.cursor;
         apply(applicable);

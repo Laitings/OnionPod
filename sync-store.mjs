@@ -138,6 +138,7 @@ export function validateExchange(body) {
         return episode ? { type, key, value, at, episode } : { type, key, value, at };
       }
     }
+    if (type === 'dismiss' && value === true && episodeFeed(key)) return { type, key, value, at };
     if (type === 'follow' && key.length <= 2048 && httpsUrl(key) === key) {
       if (value === null) return { type, key, value, at };
       if (value && typeof value === 'object' && !Array.isArray(value)) {

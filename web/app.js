@@ -508,7 +508,8 @@ const continueLimit = 6;
 function paintContinueListening() {
   const panel = $('#continue-listening');
   if (!panel) return;
-  const candidates = recentProgress(state.progress, sync.data.progressAt, state.current?.key, state.nativeProgressAt);
+  const candidates = recentProgress(state.progress, sync.data.progressAt, state.current?.key, state.nativeProgressAt,
+    sync.data.dismissedAt);
   if (navigator.onLine) {
     for (const candidate of candidates.slice(0, continueLimit)) {
       if (!findResumeEpisode(candidate.key)) recoverResumeEpisode(candidate.key);
@@ -544,7 +545,12 @@ function paintContinueListening() {
       play.dataset.episode = episode.key;
       play.setAttribute('aria-label', 'Resume ' + episode.title);
       actions.append(meta, play);
-      wrapper.append(card, actions);
+      const remove = button('', () => removeFromContinue(episode.key), 'continue-remove');
+      remove.append(icon('close'));
+      remove.dataset.episode = episode.key;
+      remove.title = 'Remove from Continue Listening';
+      remove.setAttribute('aria-label', 'Remove ' + episode.title + ' from Continue Listening');
+      wrapper.append(card, actions, remove);
       list.append(wrapper);
     }
     panel.replaceChildren(heading, list);
@@ -557,6 +563,25 @@ function paintContinueListening() {
     const pause = activeKey === play.dataset.episode && playing;
     play.textContent = pause ? 'Pause' : 'Resume';
   }
+  paintContinueRemove();
+}
+
+// The playing episode would reappear at its next checkpoint, so it cannot be removed.
+function paintContinueRemove() {
+  for (const remove of document.querySelectorAll('#continue-listening .continue-remove')) {
+    remove.hidden = playing && remove.dataset.episode === activeKey;
+  }
+}
+
+function removeFromContinue(key) {
+  const controls = () => [...document.querySelectorAll('#continue-listening .continue-remove')];
+  const index = controls().findIndex(control => control.dataset.episode === key);
+  sync.record('dismiss', key, true, true);
+  save();
+  paintContinueListening();
+  const remaining = controls();
+  (remaining[Math.min(index, remaining.length - 1)] ?? $('[data-page=discover]')).focus();
+  notice('Removed from Continue Listening.');
 }
 
 function releaseInfo(timing) {
@@ -1129,6 +1154,7 @@ function player() {
   for (const quickResume of document.querySelectorAll('#continue-listening .continue-action')) {
     quickResume.textContent = playing && quickResume.dataset.episode === activeKey ? 'Pause' : 'Resume';
   }
+  paintContinueRemove();
 }
 
 async function start(episode, fromQueue = false) {

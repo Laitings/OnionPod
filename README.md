@@ -31,7 +31,7 @@ Save the generated password in a password manager. Using `node sync-admin.mjs --
 
 Open **Sync** on the web and Android and sign in with the same password. The first sign-in imports existing follows and listening positions. Both apps keep local changes and retry when they can reach the server. Android also uploads playback checkpoints while its playback service runs. The latest dated update wins, so a recent rewind or unfollow is preserved. Queue, download files, and new episode badge counts stay on each device.
 
-**Continue Listening** on Discover resumes your most recent unfinished episode. With sync enabled, it includes playback from the other device. Existing listening positions are kept when the server adds episode metadata to its database.
+**Continue Listening** on Discover resumes your most recent unfinished episode. With sync enabled, it includes playback from the other device. Tap the × on a card to remove it from the list on both devices; your position is kept, and the episode returns if you play it again. Update the sync server before the Android app when upgrading, because an older server rejects removals and pauses sync. Existing listening positions are kept when the server adds episode metadata to its database.
 
 **Inbox** shows new episodes from followed podcasts, newest first. The first feed check establishes a baseline. Play or dismiss an episode to clear it from this device’s inbox. Opening the podcast clears its badge and keeps the episode in the inbox.
 

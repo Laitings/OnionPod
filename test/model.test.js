@@ -14,6 +14,9 @@ test('Continue Listening chooses the latest unfinished episode across local and 
   const remote = { [key('older')]: 50, [key('done')]: 100, [key('current')]: 80 };
   assert.deepEqual(recentProgress(progress, remote, key('older'), { [key('offline')]: 90 }).map(item => item.key),
     [key('offline'), key('current'), key('older')]);
+  // Removed entries stay hidden until newer progress arrives.
+  assert.deepEqual(recentProgress(progress, remote, key('older'), { [key('offline')]: 90 },
+    { [key('offline')]: 90, [key('current')]: 79 }).map(item => item.key), [key('current'), key('older')]);
 });
 
 test('podcast cards retain the primary chart category and support older follows', () => {

@@ -88,6 +88,10 @@ button.card-category:hover{text-decoration:underline;text-underline-offset:3px}
 .card-follow[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#17200e}
 .continue-meta{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
 .continue-action{margin-left:auto;min-height:40px}
+.continue-remove{position:absolute;z-index:1;top:13px;right:13px;display:grid;place-items:center;width:36px;height:36px;min-height:0;padding:0;border-radius:50%;background:#0b140fd9;border:1px solid #ffffff33}
+.continue-remove:after{content:'';position:absolute;inset:-5px}
+.continue-remove:hover{background:#0b140f;border-color:var(--accent);color:var(--accent)}
+.continue-remove .icon{width:17px;height:17px}
 
 /* Categories */
 .category-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));gap:11px;margin-top:20px}

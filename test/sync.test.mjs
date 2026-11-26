@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { serve } from '../server.mjs';
-import { SyncStore } from '../sync-store.mjs';
+import { SyncStore, validateExchange } from '../sync-store.mjs';
 
 const origin = 'https://onionpod.example.test';
 const password = 'test-only password for integration';
@@ -92,6 +92,18 @@ test('web and Android sync share durable state, with protected routes and revoke
     store.close();
     await rm(folder, { recursive: true, force: true });
   }
+});
+
+test('removing from Continue Listening is accepted and shared', () => {
+  const store = new SyncStore(':memory:');
+  try {
+    const change = { type: 'dismiss', key: episode, value: true, at: Date.now() };
+    const batch = validateExchange({ cursor: 0, changes: [change] });
+    assert.deepEqual(batch.changes, [change]);
+    store.exchange(0, batch.changes);
+    assert.deepEqual(store.exchange(0, []).changes, [change]);
+    assert.throws(() => validateExchange({ cursor: 0, changes: [{ ...change, value: false }] }));
+  } finally { store.close(); }
 });
 
 test('existing device libraries merge without overriding newer actions', async () => {
