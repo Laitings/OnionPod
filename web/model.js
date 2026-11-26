@@ -445,6 +445,11 @@ export function resumeEpisode(value, key = value?.key) {
   };
 }
 
+// Position zero means listened. The last 30 seconds count, except on clips of a minute or less.
+export function savedPosition(position, duration) {
+  return duration > 60 && duration - position <= 30 ? 0 : position;
+}
+
 export function recentProgress(progress, timestamps, currentKey, localTimestamps = {}, dismissedAt = {}) {
   return Object.entries(progress)
     .filter(([key, position]) => Number.isFinite(position) && position > 0 && episodeFeed(key))

@@ -1,4 +1,4 @@
-import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, mergeShows, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, resumeEpisode, time } from './model.js';
+import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, mergeShows, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, savedPosition, resumeEpisode, time } from './model.js';
 import { createSync } from './sync.js';
 
 const $ = selector => document.querySelector(selector);
@@ -1304,14 +1304,15 @@ function checkpoint(force = false) {
   if (observed !== undefined && Math.abs(observed - position) < (force ? 0.1 : 0.75)) return;
   observedPositions.set(key, position);
   const wasListened = state.progress[key] === 0;
-  state.progress[key] = position;
+  const value = savedPosition(position, duration);
+  state.progress[key] = value;
   const episode = resumeEpisode(state.current);
   if (episode) state.episodeDetails[key] = episode;
-  if (!native) sync.record('progress', key, position, force, episode);
+  if (!native) sync.record('progress', key, value, force, episode);
   lastCheckpoint = Date.now();
   save();
   paintContinueListening();
-  if (wasListened !== (position === 0) && ['show', 'favorites', 'queue', 'downloads'].includes(state.page)) render();
+  if (wasListened !== (value === 0) && ['show', 'favorites', 'queue', 'downloads'].includes(state.page)) render();
 }
 
 function player() {
@@ -1351,7 +1352,7 @@ async function start(episode, fromQueue = false) {
   try {
     if (!fromQueue && episode.key === activeKey) {
       const resume = state.progress[episode.key];
-      const syncResume = !playing && resume !== undefined && Math.abs(resume - position) > 1 ? resume : undefined;
+      const syncResume = !playing && resume > 0 && Math.abs(resume - position) > 1 ? resume : undefined;
       if (native) await android('toggle', { resume: syncResume, resumeAt: sync.data.progressAt[episode.key] });
       else if (audio.paused) {
         if (syncResume !== undefined) {

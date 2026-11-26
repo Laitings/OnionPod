@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { categories, chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, estimateReleasePattern, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, inboxNewestFirst, mergeShows, parseFeed, podcastCategory, rankedShows, readFeedEpisodes, recentProgress, resumeEpisode, time } from '../web/model.js';
+import { categories, chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, estimateReleasePattern, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, inboxNewestFirst, mergeShows, parseFeed, podcastCategory, rankedShows, readFeedEpisodes, recentProgress, resumeEpisode, savedPosition, time } from '../web/model.js';
 import { feedAddress, publicAddress, serve } from '../server.mjs';
 
 test('Continue Listening chooses the latest unfinished episode across local and synced progress', () => {
@@ -41,6 +41,13 @@ test('suggestions match what followed shows talk about and skip followed shows',
   assert.deepEqual(unfollowedShows([
     { url: 'https://example.com/a', title: 'Moved' }, { url: 'https://example.com/e', title: 'E' }
   ], [{ url: 'https://example.com/a', title: 'A' }]).map(show => show.title), ['E']);
+});
+
+test('the last 30 seconds count as listened', () => {
+  assert.equal(savedPosition(1769, 1800), 1769);
+  assert.equal(savedPosition(1770, 1800), 0);
+  assert.equal(savedPosition(45, 60), 45);
+  assert.equal(savedPosition(45, 0), 45);
 });
 
 test('podcast cards retain the primary chart category and support older follows', () => {

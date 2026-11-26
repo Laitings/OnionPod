@@ -121,7 +121,11 @@ public final class PlaybackService extends MediaSessionService {
     private void saveProgress() {
         MediaItem item = player.getCurrentMediaItem();
         if (item != null && (player.getPlaybackState() == Player.STATE_READY || player.getPlaybackState() == Player.STATE_ENDED)) {
-            long position = player.getPlaybackState() == Player.STATE_ENDED ? 0 : player.getCurrentPosition();
+            long position = player.getCurrentPosition();
+            long duration = player.getDuration();
+            // Position zero means listened. Matches savedPosition in web/model.js.
+            boolean nearEnd = duration != C.TIME_UNSET && duration > 60_000 && duration - position <= 30_000;
+            if (nearEnd || player.getPlaybackState() == Player.STATE_ENDED) position = 0;
             PlaybackProgress.save(this, item.mediaId, position, EpisodeMedia.from(item));
         }
     }
