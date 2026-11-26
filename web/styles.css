@@ -154,7 +154,9 @@ button.card-category:hover{text-decoration:underline;text-underline-offset:3px}
 .volume button{display:grid;place-items:center;width:44px;padding:0;border-radius:50%;color:var(--muted)}
 .volume button:hover{background:var(--raised);color:var(--ink)}
 .volume input{width:88px}
-.speed select{min-height:36px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);padding:0 8px;font-size:13px;font-weight:700}
+.speed{position:relative;display:flex}
+.speed select{appearance:none;-webkit-appearance:none;field-sizing:content;min-height:36px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);padding:0 27px 0 13px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;text-align-last:center}
+.speed:after{content:'';position:absolute;right:12px;top:50%;width:5px;height:5px;border:solid var(--muted);border-width:0 1.8px 1.8px 0;transform:translateY(-75%) rotate(45deg);pointer-events:none}
 
 /* Dialogs and notices */
 dialog{max-width:min(430px,calc(100% - 30px));width:100%;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:0 24px 70px #000a}
