@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { categories, chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, estimateReleasePattern, httpsUrl, inboxNewestFirst, mergeShows, parseFeed, podcastCategory, rankedShows, readFeedEpisodes, recentProgress, resumeEpisode, time } from '../web/model.js';
+import { categories, chartIds, directoryShows, enqueue, episodeActivity, episodeInboxUpdate, estimateReleasePattern, followedCategories, unfollowedShows, httpsUrl, inboxNewestFirst, mergeShows, parseFeed, podcastCategory, rankedShows, readFeedEpisodes, recentProgress, resumeEpisode, time } from '../web/model.js';
 import { feedAddress, publicAddress, serve } from '../server.mjs';
 
 test('Continue Listening chooses the latest unfinished episode across local and synced progress', () => {
@@ -17,6 +17,20 @@ test('Continue Listening chooses the latest unfinished episode across local and 
   // Removed entries stay hidden until newer progress arrives.
   assert.deepEqual(recentProgress(progress, remote, key('older'), { [key('offline')]: 90 },
     { [key('offline')]: 90, [key('current')]: 79 }).map(item => item.key), [key('current'), key('older')]);
+});
+
+test('suggestions follow the most common categories and skip followed shows', () => {
+  const follows = [
+    { url: 'https://example.com/a', title: 'A', category: 'Comedy', categoryId: 1303 },
+    { url: 'https://example.com/b', title: 'B', category: 'True Crime', categoryId: 1488 },
+    { url: 'https://example.com/c', title: 'C', category: 'True Crime', categoryId: 1488 },
+    { url: 'https://example.com/d', title: 'D' }
+  ];
+  assert.deepEqual(followedCategories(follows).map(category => category.id), [1488, 1303]);
+  assert.deepEqual(unfollowedShows([
+    { url: 'https://example.com/a', title: 'Moved' }, { url: 'https://example.com/new-b', title: 'b ' },
+    { url: 'https://example.com/e', title: 'E' }
+  ], follows).map(show => show.title), ['E']);
 });
 
 test('podcast cards retain the primary chart category and support older follows', () => {

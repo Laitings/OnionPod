@@ -33,6 +33,8 @@ Open **Sync** on the web and Android and sign in with the same password. The fir
 
 **Continue Listening** on Discover resumes your most recent unfinished episode. With sync enabled, it includes playback from the other device. Tap the × on a card to remove it from the list on both devices; your position is kept, and the episode returns if you play it again. Update the sync server before the Android app when upgrading, because an older server rejects removals and pauses sync. Existing listening positions are kept when the server adds episode metadata to its database.
 
+**Suggested for you** on Discover lists popular shows from the categories you follow most, leaving out shows you already follow. It appears once at least one followed show has a known category.
+
 **Inbox** shows new episodes from followed podcasts, newest first. The first feed check establishes a baseline. Play or dismiss an episode to clear it from this device’s inbox. Opening the podcast clears its badge and keeps the episode in the inbox.
 
 Podcast pages show **Upcoming** when the feed lists a future release. Future-dated episodes become eligible for the episode list and new episode counts on feed checks after their release time. When the feed gives no upcoming date, a consistent recent daily, weekday, weekly, or every-other-week schedule may appear as an estimate.

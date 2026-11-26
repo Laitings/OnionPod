@@ -52,6 +52,25 @@ export function podcastCategory(show) {
   return categories.find(category => category.title.toLowerCase() === title.toLowerCase()) ?? null;
 }
 
+// The categories a listener follows most, for suggestions.
+export function followedCategories(follows, limit = 3) {
+  const counts = new Map();
+  for (const show of follows) {
+    const category = podcastCategory(show);
+    if (!category) continue;
+    const entry = counts.get(category.id) ?? { category, count: 0 };
+    entry.count++;
+    counts.set(category.id, entry);
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count).slice(0, limit).map(entry => entry.category);
+}
+
+export function unfollowedShows(shows, follows, limit = 12) {
+  const urls = new Set(follows.map(show => show.url));
+  const titles = new Set(follows.map(show => show.title?.trim().toLowerCase()));
+  return shows.filter(show => !urls.has(show.url) && !titles.has(show.title?.trim().toLowerCase())).slice(0, limit);
+}
+
 export function directoryShows(results) {
   const seen = new Set();
   return results.flatMap(item => {

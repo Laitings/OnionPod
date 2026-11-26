@@ -1,4 +1,4 @@
-import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, mergeShows, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, resumeEpisode, time } from './model.js';
+import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, mergeShows, followedCategories, unfollowedShows, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, resumeEpisode, time } from './model.js';
 import { createSync } from './sync.js';
 
 const $ = selector => document.querySelector(selector);
@@ -48,6 +48,10 @@ let explore = readExploreCache();
 let exploreJob = false;
 let exploreRetryAfter = 0;
 const searchCache = new Map();
+const suggestKey = 'onionpod-suggest-v1';
+let suggestions = readSuggestionCache();
+let suggestJob = false;
+let suggestRetryAfter = 0;
 const initialRoute = { page: 'discover', depth: 0 };
 const tabs = {
   discover: 'Discover', categories: 'Categories', category: 'Categories', show: 'Podcast',
@@ -178,6 +182,7 @@ function paintSync() {
     : enabled === false ? 'Sync is waiting for the server account to be set up.'
       : 'Sign in with the same OnionPod sync password on both devices.');
   refreshExplore();
+  refreshSuggestions();
 }
 
 function notice(message) {
@@ -529,13 +534,18 @@ function paintContinueListening() {
   }
   const signature = items.map(item => item.episode.key).join('\n');
   if (panel.dataset.episodes !== signature) {
-    for (const cover of panel.querySelectorAll('[data-artwork-feed]')) coverObserver.unobserve(cover);
     panel.dataset.episodes = signature;
     const heading = el('div', 'section-head');
     heading.append(el('h2', '', 'Continue Listening'));
     const list = el('div', 'grid');
+    const existing = new Map([...panel.querySelectorAll('article')].map(card => [card.dataset.key, card]));
     for (const { episode } of items) {
+      if (existing.has(episode.key)) {
+        list.append(existing.get(episode.key));
+        continue;
+      }
       const wrapper = el('article', 'podcast-card');
+      wrapper.dataset.key = episode.key;
       const card = button('', () => openFeed(episode.feed, { title: episode.show, artwork: episode.artwork }), 'card');
       card.append(artwork(episode, 'cover', true), el('strong', '', episode.title), el('small', '', episode.show));
       const actions = el('div', 'card-actions');
@@ -573,12 +583,58 @@ function paintContinueRemove() {
   }
 }
 
-function removeFromContinue(key) {
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+// The card lifts, spins away, and leaves a small burst of green sparks.
+async function dissolve(card) {
+  const box = card.getBoundingClientRect();
+  const x = box.left + box.width / 2;
+  const y = box.top + box.height / 2;
+  for (let index = 0; index < 18; index++) {
+    const spark = el('span', 'spark');
+    spark.style.left = x + 'px';
+    spark.style.top = y + 'px';
+    document.body.append(spark);
+    const angle = index / 18 * Math.PI * 2;
+    const reach = box.width * (0.45 + Math.random() * 0.35);
+    spark.animate([
+      { transform: 'translate(-50%,-50%) scale(1)', opacity: 1 },
+      { transform: `translate(calc(-50% + ${Math.cos(angle) * reach}px), calc(-50% + ${Math.sin(angle) * reach}px)) scale(0)`, opacity: 0 }
+    ], { duration: 520 + Math.random() * 200, delay: 140, easing: 'cubic-bezier(.15,.7,.3,1)', fill: 'both' })
+      .finished.finally(() => spark.remove());
+  }
+  await card.animate([
+    { transform: 'none', opacity: 1, filter: 'blur(0)' },
+    { transform: 'scale(1.07) rotate(-2deg)', opacity: 1, filter: 'blur(0)', offset: 0.3 },
+    { transform: 'translateY(24px) scale(.2) rotate(14deg)', opacity: 0, filter: 'blur(7px)' }
+  ], { duration: 460, easing: 'cubic-bezier(.45,0,.75,.4)', fill: 'forwards' }).finished;
+}
+
+// Remaining cards glide from their old places into the gap.
+function glide(before) {
+  for (const card of document.querySelectorAll('#continue-listening article')) {
+    const old = before.get(card);
+    if (!old) continue;
+    const now = card.getBoundingClientRect();
+    if (old.left === now.left && old.top === now.top) continue;
+    card.animate([{ transform: `translate(${old.left - now.left}px, ${old.top - now.top}px)` }, { transform: 'none' }],
+      { duration: 380, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  }
+}
+
+async function removeFromContinue(key) {
+  const card = [...document.querySelectorAll('#continue-listening article')].find(item => item.dataset.key === key);
+  if (!card || card.dataset.leaving !== undefined) return;
+  card.dataset.leaving = '';
+  if (!reducedMotion.matches) await dissolve(card).catch(() => {});
+  const before = new Map([...document.querySelectorAll('#continue-listening article')]
+    .filter(item => item !== card).map(item => [item, item.getBoundingClientRect()]));
   const controls = () => [...document.querySelectorAll('#continue-listening .continue-remove')];
   const index = controls().findIndex(control => control.dataset.episode === key);
   sync.record('dismiss', key, true, true);
   save();
   paintContinueListening();
+  if (!reducedMotion.matches) glide(before);
   const remaining = controls();
   (remaining[Math.min(index, remaining.length - 1)] ?? $('[data-page=discover]')).focus();
   notice('Removed from Continue Listening.');
@@ -746,6 +802,10 @@ function render() {
       resume.id = 'continue-listening';
       content.append(resume);
       paintContinueListening();
+      const suggested = el('section', 'section');
+      suggested.id = 'suggested';
+      suggested.hidden = true;
+      content.append(suggested);
     }
     const section = el('section', 'section');
     const heading = el('div', 'section-head');
@@ -768,6 +828,8 @@ function render() {
     }
     content.append(section);
     paintExplore();
+    paintSuggestions();
+    refreshSuggestions();
   } else if (page === 'categories') {
     const list = el('div', 'category-grid');
     for (const category of categories) {
@@ -904,6 +966,58 @@ async function chartCategoryPage(categoryId) {
   const batch = ids.slice(0, categoryPageSize);
   const shows = await lookupShows(batch);
   return { ids, shows, loaded: batch.length };
+}
+
+function readSuggestionCache() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(suggestKey));
+    if (Array.isArray(cached?.shows) && typeof cached.signature === 'string') return cached;
+  } catch { /* Suggestions are fetched again when storage is unavailable. */ }
+  return { signature: '', shows: [], refreshedAt: 0 };
+}
+
+function paintSuggestions() {
+  const panel = $('#suggested');
+  if (!panel || panel.contains(document.activeElement)) return;
+  const categoriesFollowed = followedCategories(state.follows);
+  const shows = categoriesFollowed.length ? unfollowedShows(suggestions.shows, state.follows) : [];
+  for (const cover of panel.querySelectorAll('[data-artwork-feed]')) coverObserver.unobserve(cover);
+  panel.hidden = !shows.length;
+  if (!shows.length) return panel.replaceChildren();
+  const heading = el('div', 'section-head');
+  heading.append(el('h2', '', 'Suggested for you'),
+    el('small', '', 'Based on ' + suggestions.titles.join(', ')));
+  const shelf = grid(shows);
+  shelf.classList.add('shelf');
+  panel.replaceChildren(heading, shelf);
+  updateEpisodeBadges();
+}
+
+async function refreshSuggestions() {
+  const followed = followedCategories(state.follows);
+  const signature = followed.map(category => category.id).join(',');
+  const { relayRequiresLogin } = sync.status();
+  if (!followed.length || state.page !== 'discover' || state.query || document.hidden || !navigator.onLine ||
+      suggestJob || Date.now() < suggestRetryAfter ||
+      (signature === suggestions.signature && Date.now() - suggestions.refreshedAt < exploreMaxAge) ||
+      (!native && relayRequiresLogin !== false && !sync.data.signedIn)) return;
+  suggestJob = true;
+  try {
+    const results = await Promise.allSettled(followed.map(async category =>
+      category.queries ? (await topicShows(category.queries)).shows : chartShows(category.id)));
+    const lists = results.filter(result => result.status === 'fulfilled').map(result => result.value);
+    if (!lists.length) throw results[0].reason;
+    suggestions = {
+      signature, titles: followed.map(category => category.title),
+      shows: mergeShows(lists, 75), refreshedAt: Date.now()
+    };
+    try { localStorage.setItem(suggestKey, JSON.stringify(suggestions)); } catch { /* Kept in memory. */ }
+    paintSuggestions();
+  } catch (error) {
+    suggestRetryAfter = error.status === 401 ? 0 : Date.now() + 60_000;
+  } finally {
+    suggestJob = false;
+  }
 }
 
 async function refreshExplore() {
