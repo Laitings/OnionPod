@@ -28,7 +28,7 @@ import org.json.JSONObject;
 
 public final class PlaybackService extends MediaSessionService {
     static final SessionCommand LOAD_EPISODE = new SessionCommand("app.onionpod.LOAD_EPISODE", Bundle.EMPTY);
-    private static final long DISCONNECT_REWIND_MS = 5_000;
+    private static final long DISCONNECT_REWIND_MS = 15_000;
     private MediaSession session;
     private ExoPlayer player;
     private SyncTransport transport;
