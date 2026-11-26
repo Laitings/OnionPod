@@ -2,6 +2,7 @@ package app.onionpod;
 
 import android.app.PendingIntent;
 import android.content.Intent;
+import android.media.AudioManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -29,6 +30,7 @@ import org.json.JSONObject;
 public final class PlaybackService extends MediaSessionService {
     static final SessionCommand LOAD_EPISODE = new SessionCommand("app.onionpod.LOAD_EPISODE", Bundle.EMPTY);
     private static final long DISCONNECT_REWIND_MS = 15_000;
+    private static final long CALL_REWIND_MS = 5_000;
     private MediaSession session;
     private ExoPlayer player;
     private SyncTransport transport;
@@ -38,6 +40,16 @@ public final class PlaybackService extends MediaSessionService {
     private long lastUpload;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable advance = this::advanceQueue;
+    private boolean heldForCall;
+    // The audio mode can change just after focus is lost, so it is checked for as long as playback is held.
+    private final Runnable watchForCall = new Runnable() {
+        @Override public void run() {
+            if (player.getPlaybackSuppressionReason() != Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) return;
+            // Ringing, phone calls, and internet calls all leave the normal mode. Alerts do not.
+            if (getSystemService(AudioManager.class).getMode() != AudioManager.MODE_NORMAL) heldForCall = true;
+            handler.postDelayed(this, 500);
+        }
+    };
     private final Runnable checkpoint = new Runnable() {
         @Override public void run() {
             if (SleepTimer.expire()) player.pause();
@@ -59,7 +71,15 @@ public final class PlaybackService extends MediaSessionService {
         player.addListener(new Player.Listener() {
             @Override public void onPlayWhenReadyChanged(boolean ready, int reason) {
                 if (!ready && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY) {
-                    rewindAfterDisconnect();
+                    rewind(DISCONNECT_REWIND_MS);
+                }
+            }
+            @Override public void onPlaybackSuppressionReasonChanged(int reason) {
+                handler.removeCallbacks(watchForCall);
+                if (reason == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) handler.post(watchForCall);
+                else if (heldForCall && reason == Player.PLAYBACK_SUPPRESSION_REASON_NONE) {
+                    heldForCall = false;
+                    rewind(CALL_REWIND_MS);
                 }
             }
             @Override public void onIsPlayingChanged(boolean playing) {
@@ -110,10 +130,10 @@ public final class PlaybackService extends MediaSessionService {
         handler.post(checkpoint);
     }
 
-    private void rewindAfterDisconnect() {
+    private void rewind(long amount) {
         MediaItem item = player.getCurrentMediaItem();
         if (item == null || !player.isCurrentMediaItemSeekable() || player.getPlaybackState() == Player.STATE_ENDED) return;
-        long resumePosition = Math.max(0, player.getCurrentPosition() - DISCONNECT_REWIND_MS);
+        long resumePosition = Math.max(0, player.getCurrentPosition() - amount);
         player.seekTo(resumePosition);
         PlaybackProgress.save(this, item.mediaId, resumePosition, EpisodeMedia.from(item));
         flushProgress();
@@ -185,6 +205,7 @@ public final class PlaybackService extends MediaSessionService {
     @Override public void onDestroy() {
         handler.removeCallbacks(checkpoint);
         handler.removeCallbacks(advance);
+        handler.removeCallbacks(watchForCall);
         saveProgress();
         flushProgress();
         session.release();

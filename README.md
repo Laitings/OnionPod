@@ -71,7 +71,7 @@ Android packages the shared interface locally and accesses feeds directly. Media
 
 Tap the artwork or title in the Android mini player to open a full-screen player. Tap the large artwork to open the podcast’s page. Use the arrow at the top or the Back button to close the player.
 
-When Android pauses playback after an audio output disconnects, OnionPod rewinds by 15 seconds so you hear that part again when you press Play. Alerts that temporarily take audio focus resume playback at the same position when the alert releases focus.
+When Android pauses playback after an audio output disconnects, OnionPod rewinds by 15 seconds so you hear that part again when you press Play. After a phone or internet call, playback resumes 5 seconds earlier. Alerts that temporarily take audio focus resume playback at the same position when the alert releases focus.
 
 ## Project layout
 
