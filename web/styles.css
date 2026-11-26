@@ -115,7 +115,8 @@ button.card-category:hover{text-decoration:underline;text-underline-offset:3px}
 .show-release small{font-size:.88em}
 .show-release time+small{display:block}
 .show-description{margin:0 0 30px;max-width:72ch}
-.show-description h2{margin-bottom:8px}
+.about-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.about-head .episode-icon[aria-expanded=true]{color:var(--muted);background:var(--surface);border-color:var(--line)}
 .show-description p{color:var(--muted);line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}
 .library-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px}
 .library-heading h1{margin:0}

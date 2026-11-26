@@ -14,6 +14,7 @@ const state = {
   inbox: saved.inbox ?? [],
   favorites: saved.favorites ?? [],
   hideListened: Boolean(saved.hideListened),
+  hideAbout: Boolean(saved.hideAbout),
   downloads: saved.downloads ?? [], current: saved.current ?? null, rate: saved.rate ?? 1,
   volume: Number.isFinite(saved.volume) ? Math.max(0, Math.min(1, saved.volume)) : 1,
   muted: Boolean(saved.muted),
@@ -114,9 +115,9 @@ function android(action, data = {}) {
 }
 
 function save() {
-  const { follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened } = state;
+  const { follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout } = state;
   try {
-    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, syncState: sync.data }));
+    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout, syncState: sync.data }));
     return true;
   } catch {
     notice('OnionPod could not save changes on this device.');
@@ -934,7 +935,26 @@ function render() {
     content.append(intro);
     if (show.description) {
       const about = el('section', 'show-description');
-      about.append(el('h2', '', 'About the podcast'), el('p', '', show.description));
+      const heading = el('div', 'about-head');
+      const text = el('p', '', show.description);
+      text.id = 'about-text';
+      const toggle = button('', () => {
+        state.hideAbout = !state.hideAbout;
+        save();
+        paintAbout();
+      }, 'outline episode-icon');
+      toggle.setAttribute('aria-controls', text.id);
+      const paintAbout = () => {
+        const label = state.hideAbout ? 'Show description' : 'Hide description';
+        text.hidden = state.hideAbout;
+        toggle.replaceChildren(icon(state.hideAbout ? 'plus' : 'minus'));
+        toggle.title = label;
+        toggle.setAttribute('aria-label', label);
+        toggle.setAttribute('aria-expanded', String(!state.hideAbout));
+      };
+      paintAbout();
+      heading.append(el('h2', '', 'About the podcast'), toggle);
+      about.append(heading, text);
       content.append(about);
     }
     const heard = show.episodes.filter(episode => isListened(episode.key)).length;

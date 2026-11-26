@@ -37,6 +37,8 @@ Open **Sync** on the web and Android and sign in with the same password. The fir
 
 Episodes played to within 30 seconds of the end are tinted blue and marked **Listened**. Use **Hide listened** on a podcast page to leave them out; the choice is saved per device. The circled check on an episode marks it listened or not listened by hand and syncs like other progress. Seeking back to the very start of an episode also records it as listened.
 
+On a podcast page, the − / + button beside **About the podcast** hides or shows the description. The choice is saved per device and applies to every podcast.
+
 **Inbox** shows new episodes from followed podcasts, newest first. The first feed check establishes a baseline. Play or dismiss an episode to clear it from this device’s inbox. Opening the podcast clears its badge and keeps the episode in the inbox.
 
 Podcast pages show **Upcoming** when the feed lists a future release. Future-dated episodes become eligible for the episode list and new episode counts on feed checks after their release time. When the feed gives no upcoming date, a consistent recent daily, weekday, weekly, or every-other-week schedule may appear as an estimate.
