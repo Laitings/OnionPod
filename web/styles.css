@@ -123,6 +123,11 @@ button.card-category:hover{text-decoration:underline;text-underline-offset:3px}
 .episodes{display:grid;gap:9px}
 .episode{display:flex;gap:10px 14px;align-items:center;flex-wrap:wrap;border:1px solid var(--hairline);background:var(--surface);padding:12px 14px;border-radius:15px;transition:border-color .16s,background-color .16s}
 .episode:hover{border-color:var(--line)}
+.episode[data-listened]{background:#11222a;border-color:#244450}
+.episode[data-listened] strong{color:#a9c3cc}
+.listened-mark{color:#78c7d6;font-weight:700}
+.episodes-head{align-items:center}
+.episodes-head .outline{margin-left:auto;min-height:40px}
 .episode[data-active]{border-color:#7fbf63;background:#172c1d}
 .episode-info{display:flex;align-items:center;gap:13px;flex:1 1 220px;min-width:0}
 .episode-copy{min-width:0}

@@ -13,6 +13,7 @@ const state = {
   episodeActivity: saved.episodeActivity ?? {},
   inbox: saved.inbox ?? [],
   favorites: saved.favorites ?? [],
+  hideListened: Boolean(saved.hideListened),
   downloads: saved.downloads ?? [], current: saved.current ?? null, rate: saved.rate ?? 1,
   volume: Number.isFinite(saved.volume) ? Math.max(0, Math.min(1, saved.volume)) : 1,
   muted: Boolean(saved.muted),
@@ -113,9 +114,9 @@ function android(action, data = {}) {
 }
 
 function save() {
-  const { follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites } = state;
+  const { follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened } = state;
   try {
-    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, syncState: sync.data }));
+    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, syncState: sync.data }));
     return true;
   } catch {
     notice('OnionPod could not save changes on this device.');
@@ -663,6 +664,11 @@ function releaseInfo(timing) {
   return line;
 }
 
+// Playback stores position zero when an episode reaches its end.
+function isListened(key) {
+  return state.progress[key] === 0 && !(playing && activeKey === key);
+}
+
 function insertList(target, episodes, context) {
   if (!episodes.length) {
     target.append(el('p', 'empty', {
@@ -679,6 +685,8 @@ function insertList(target, episodes, context) {
   for (const [index, episode] of episodes.entries()) {
     const row = el('article', 'episode');
     if (state.current?.key === episode.key) row.dataset.active = '';
+    const listened = isListened(episode.key);
+    if (listened) row.dataset.listened = '';
     const info = el('div', 'episode-info');
     const copy = el('div', 'episode-copy');
     if (context !== 'feed') info.append(artwork(episode, 'mini-cover', true));
@@ -686,7 +694,9 @@ function insertList(target, episodes, context) {
     const progress = state.progress[episode.key];
     const meta = [context !== 'feed' ? episode.show : '', !Number.isNaN(date.valueOf()) ? date.toLocaleDateString() : '', progress ? 'Resume at ' + time(progress) : ''];
     if (context === 'downloads') meta.push({ pending: 'Downloading', ready: 'Available offline', failed: 'Download failed' }[episode.downloadState] ?? 'Checking download');
-    copy.append(el('strong', '', episode.title), el('small', '', meta.filter(Boolean).join(' · ')));
+    const details = el('small', '', meta.filter(Boolean).join(' · '));
+    if (listened) details.prepend(el('span', 'listened-mark', '✓ Listened'), ' · ');
+    copy.append(el('strong', '', episode.title), details);
     info.append(copy);
     const actions = el('div', 'actions');
     const isPlaying = playing && activeKey === episode.key;
@@ -889,11 +899,23 @@ function render() {
       about.append(el('h2', '', 'About the podcast'), el('p', '', show.description));
       content.append(about);
     }
-    const header = el('div', 'section-head');
-    header.append(el('h2', '', 'Episodes'), el('small', '', String(show.episodes.length)));
+    const heard = show.episodes.filter(episode => isListened(episode.key)).length;
+    const episodes = state.hideListened ? show.episodes.filter(episode => !isListened(episode.key)) : show.episodes;
+    const header = el('div', 'section-head episodes-head');
+    const count = heard ? show.episodes.length + ' · ' + heard + ' listened' : String(show.episodes.length);
+    header.append(el('h2', '', 'Episodes'), el('small', '', count));
+    const filter = button(state.hideListened ? 'Show listened' : 'Hide listened', () => {
+      state.hideListened = !state.hideListened;
+      save();
+      render();
+      $('#listened-filter').focus();
+    });
+    filter.id = 'listened-filter';
+    header.append(filter);
     content.append(header);
-    insertList(content, show.episodes.slice(0, state.episodeLimit), 'feed');
-    if (show.episodes.length > state.episodeLimit) {
+    if (!episodes.length && heard) content.append(el('p', 'empty', 'You have listened to every episode here.'));
+    else insertList(content, episodes.slice(0, state.episodeLimit), 'feed');
+    if (episodes.length > state.episodeLimit) {
       const more = button('Show more episodes', () => { state.episodeLimit += 50; render(); });
       more.classList.add('more');
       content.append(more);
@@ -1281,6 +1303,7 @@ function checkpoint(force = false) {
   const observed = observedPositions.get(key);
   if (observed !== undefined && Math.abs(observed - position) < (force ? 0.1 : 0.75)) return;
   observedPositions.set(key, position);
+  const wasListened = state.progress[key] === 0;
   state.progress[key] = position;
   const episode = resumeEpisode(state.current);
   if (episode) state.episodeDetails[key] = episode;
@@ -1288,6 +1311,7 @@ function checkpoint(force = false) {
   lastCheckpoint = Date.now();
   save();
   paintContinueListening();
+  if (wasListened !== (position === 0) && ['show', 'favorites', 'queue', 'downloads'].includes(state.page)) render();
 }
 
 function player() {
