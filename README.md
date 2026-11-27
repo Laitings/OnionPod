@@ -47,7 +47,7 @@ Podcast pages can **search** episode titles and notes and switch between **newes
 
 On Android, **Library → Notify me** turns on notifications for new episodes from followed shows. A system job checks about every four hours when there is a network, so alerts are not immediate, and Android may delay them further to save battery.
 
-**Inbox** shows new episodes from followed podcasts, newest first. The first feed check establishes a baseline. Play or dismiss an episode to clear it from this device’s inbox. Opening the podcast clears its badge and keeps the episode in the inbox.
+**Inbox** shows new episodes from followed podcasts, newest first, and its tab shows how many are waiting. The first feed check establishes a baseline. Play or dismiss an episode to clear it from this device’s inbox. Opening the podcast clears its badge and keeps the episode in the inbox.
 
 Podcast pages show **Upcoming** when the feed lists a future release. Future-dated episodes become eligible for the episode list and new episode counts on feed checks after their release time. When the feed gives no upcoming date, a consistent recent daily, weekday, weekly, or every-other-week schedule may appear as an estimate.
 

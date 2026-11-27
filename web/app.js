@@ -127,10 +127,17 @@ function android(action, data = {}) {
   });
 }
 
+function paintInboxCount() {
+  const now = Date.now();
+  const count = state.inbox.filter(episode => !(Date.parse(episode.date) > now)).length;
+  $('#inbox-count').textContent = count > 99 ? '99+' : count || '';
+}
+
 function save() {
   const { follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout, showSettings, oldestFirst, settings } = state;
   publishQueue();
   shareFollows();
+  paintInboxCount();
   try {
     localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout, showSettings, oldestFirst, settings, syncState: sync.data }));
     return true;
@@ -1145,6 +1152,7 @@ function render() {
     else tab.removeAttribute('aria-current');
   }
   $('#queue-count').textContent = state.queue.length || '';
+  paintInboxCount();
   $('#section-label').textContent = tabs[page];
   const content = $('#content');
   episodePlayButtons.clear();
