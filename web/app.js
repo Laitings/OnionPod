@@ -1,4 +1,4 @@
-import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, mergeShows, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, savedPosition, filterEpisodes, queueItems, resumeEpisode, time } from './model.js';
+import { catalog, categories, podcastCategory, directoryShows, chartIds, rankedShows, mergeShows, unfollowedShows, showTerms, searchKeywords, rankSimilar, httpsUrl, parseFeed, readArtwork, readFeedEpisodes, episodeInboxUpdate, inboxNewestFirst, enqueue, episodeFeed, recentProgress, savedPosition, filterEpisodes, queueItems, resumeEpisode, time, readSettings, settingChoices } from './model.js';
 import { createSync } from './sync.js';
 
 const $ = selector => document.querySelector(selector);
@@ -18,7 +18,7 @@ const state = {
   showSettings: saved.showSettings ?? {}, oldestFirst: Boolean(saved.oldestFirst), episodeQuery: '',
   downloads: saved.downloads ?? [], current: saved.current ?? null, rate: saved.rate ?? 1,
   volume: Number.isFinite(saved.volume) ? Math.max(0, Math.min(1, saved.volume)) : 1,
-  muted: Boolean(saved.muted),
+  muted: Boolean(saved.muted), settings: readSettings(saved.settings),
   openEpisodeNotes: new Set(),
   page: 'discover', show: null, query: '', results: null, message: '', loading: false
 };
@@ -65,7 +65,8 @@ let suggestRetryAfter = 0;
 const initialRoute = { page: 'discover', depth: 0 };
 const tabs = {
   discover: 'Discover', categories: 'Categories', category: 'Categories', show: 'Podcast',
-  library: 'Library', favorites: 'Favorites', inbox: 'Inbox', queue: 'Queue', downloads: 'Downloads'
+  library: 'Library', favorites: 'Favorites', inbox: 'Inbox', queue: 'Queue', downloads: 'Downloads',
+  settings: 'Settings'
 };
 const coverUrls = new Map(catalog.map(show => [show.url, show.artwork]));
 const coverJobs = new Map();
@@ -101,6 +102,8 @@ const coverObserver = new IntersectionObserver(entries => {
 
 if (native) {
   $('[data-page=downloads]').hidden = false;
+  // Sync lives in Settings on Android, where the top bar is narrow.
+  $('#open-sync').hidden = true;
   $('#volume-control').hidden = true;
   native.onmessage = event => {
     const { id, value, error } = JSON.parse(event.data);
@@ -125,11 +128,11 @@ function android(action, data = {}) {
 }
 
 function save() {
-  const { follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout, showSettings, oldestFirst } = state;
+  const { follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout, showSettings, oldestFirst, settings } = state;
   publishQueue();
   shareFollows();
   try {
-    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout, showSettings, oldestFirst, syncState: sync.data }));
+    localStorage.setItem(key, JSON.stringify({ follows, queue, progress, current, rate, volume, muted, downloads, episodeActivity, episodeDetails, nativeProgressAt, inbox, favorites, hideListened, hideAbout, showSettings, oldestFirst, settings, syncState: sync.data }));
     return true;
   } catch {
     notice('OnionPod could not save changes on this device.');
@@ -546,6 +549,101 @@ function shareShowSettings() {
   if (native) android('show-settings', { defaultRate: state.rate, shows: state.showSettings }).catch(() => {});
 }
 
+function setDefaultRate(rate) {
+  state.rate = rate;
+  save();
+  shareShowSettings();
+  if (state.current && state.showSettings[state.current.feed]?.rate === undefined) {
+    $('#rate').value = state.rate;
+    applyRate(state.rate);
+  }
+}
+
+// Android reads skip and rewind lengths in its playback service, which runs without the web layer.
+function shareSettings() {
+  if (native) android('settings', state.settings).catch(() => {});
+}
+
+function changeSetting(name, value) {
+  state.settings = { ...state.settings, [name]: value };
+  save();
+  shareSettings();
+  paintSkips();
+}
+
+function paintSkips() {
+  const { skipBack, skipForward } = state.settings;
+  for (const [id, seconds, label] of [['#rewind', skipBack, 'Back '], ['#forward', skipForward, 'Forward ']]) {
+    const control = $(id);
+    control.setAttribute('aria-label', label + seconds + ' seconds');
+    control.title = label + seconds + ' seconds';
+    control.querySelector('small').textContent = seconds;
+  }
+}
+
+function secondsLabel(value) {
+  return value === 0 ? 'Off' : value < 60 || value % 60 ? value + ' s' : value / 60 + ' min';
+}
+
+function settingsPage() {
+  const page = el('div', 'settings');
+  const section = title => {
+    const group = el('section', 'settings-group');
+    group.append(el('h2', '', title));
+    page.append(group);
+    return group;
+  };
+  const row = (group, label, control, hint) => {
+    const line = el('div', 'settings-row');
+    const text = el('div', 'settings-text');
+    const name = el(control.tagName === 'SELECT' ? 'label' : 'span', '', label);
+    control.id ||= 'setting-' + label.toLowerCase().replace(/[^a-z]+/g, '-');
+    if (control.tagName === 'SELECT') name.htmlFor = control.id;
+    else control.setAttribute('aria-label', label);
+    text.append(name);
+    if (hint) text.append(el('small', '', hint));
+    line.append(text, control);
+    group.append(line);
+  };
+  const select = (options, current, change) => {
+    const control = el('select');
+    for (const [value, text] of options) {
+      const option = el('option', '', text);
+      option.value = String(value);
+      control.append(option);
+    }
+    control.value = String(current);
+    control.addEventListener('change', () => change(control.value));
+    return control;
+  };
+  const choice = name => select(settingChoices[name].map(value => [value, secondsLabel(value)]), state.settings[name],
+    value => changeSetting(name, Number(value)));
+
+  const playback = section('Playback');
+  const rates = [...$('#rate').options].map(option => [option.value, option.textContent]);
+  row(playback, 'Default speed', select(rates, state.rate, value => setDefaultRate(Number(value))),
+    'Podcasts with their own speed keep it. Set one on the podcast page.');
+  row(playback, 'Skip back', choice('skipBack'));
+  row(playback, 'Skip forward', choice('skipForward'));
+  if (native) {
+    row(playback, 'Rewind when headphones disconnect', choice('disconnectRewind'),
+      'When Bluetooth or wired audio drops and playback pauses.');
+    row(playback, 'Rewind after a call', choice('callRewind'), 'Phone and internet calls.');
+    const alerts = section('Notifications');
+    row(alerts, 'New episode alerts', notificationButton(), 'Checks followed podcasts every few hours.');
+  }
+  const syncing = section('Sync');
+  const { message } = sync.status();
+  syncing.append(el('p', 'meta', message || (sync.data.signedIn
+    ? 'Signed in. Follows, the queue, and listening progress sync with your other devices.'
+    : 'Sign in to sync follows, the queue, and listening progress between devices.')));
+  const actions = el('div', 'library-actions');
+  if (sync.data.signedIn) actions.append(button('Sync now', () => sync.run(), 'primary'));
+  actions.append(button(sync.data.signedIn ? 'Manage sync' : 'Sign in', openSync));
+  syncing.append(actions);
+  return page;
+}
+
 function shareFollows() {
   if (!native) return;
   const items = state.follows.map(({ url, title }) => ({ url, title }));
@@ -591,15 +689,6 @@ function showPlayback(feed) {
   choose('Speed for this podcast', [['', 'Default'], ...rates], String(state.showSettings[feed]?.rate ?? ''), value => {
     changeShowSetting(feed, 'rate', value ? Number(value) : undefined);
     if (state.current?.feed === feed) { $('#rate').value = rateFor(feed); applyRate(rateFor(feed)); }
-  });
-  choose('Default for others', rates, String(state.rate), value => {
-    state.rate = Number(value);
-    save();
-    shareShowSettings();
-    if (state.current && state.showSettings[state.current.feed]?.rate === undefined) {
-      $('#rate').value = state.rate;
-      applyRate(state.rate);
-    }
   });
   choose('Skip intro', [['0', 'Off'], ['15', '15 s'], ['30', '30 s'], ['45', '45 s'], ['60', '1 min'],
     ['90', '1.5 min'], ['120', '2 min'], ['180', '3 min']], String(introFor(feed)),
@@ -669,7 +758,7 @@ function notificationButton() {
     paint();
   });
   const paint = () => {
-    control.textContent = notifications ? 'Notifications on' : 'Notify me';
+    control.textContent = notifications ? 'On' : 'Off';
     control.setAttribute('aria-pressed', String(notifications));
   };
   paint();
@@ -1204,10 +1293,11 @@ function render() {
   } else if (page === 'library') {
     const heading = el('div', 'library-heading');
     const actions = el('div', 'library-actions');
-    if (native) actions.append(notificationButton());
     actions.append(button('Favorites', () => navigate({ page: 'favorites' })));
     heading.append(el('h1', '', 'Your library'), actions);
     content.append(heading, state.follows.length ? grid(state.follows) : el('p', 'empty', 'Follow a podcast to find it here.'));
+  } else if (page === 'settings') {
+    content.append(el('h1', '', 'Settings'), settingsPage());
   } else {
     content.append(el('h1', '', { favorites: 'Favorites', inbox: 'New Episodes', queue: 'Up next', downloads: 'Downloads' }[page]));
     if (page === 'favorites') insertList(content, state.favorites, 'favorites');
@@ -1740,7 +1830,8 @@ if (audio) {
   if ('mediaSession' in navigator) {
     for (const [action, callback] of Object.entries({
       play: () => { if (state.current && audio.paused) start(state.current); }, pause: () => audio.pause(),
-      seekbackward: () => seek(position - 15), seekforward: () => seek(position + 30),
+      seekbackward: () => seek(position - state.settings.skipBack),
+      seekforward: () => seek(position + state.settings.skipForward),
       seekto: details => seek(details.seekTime)
     })) {
       try { navigator.mediaSession.setActionHandler(action, callback); } catch { /* Browser support varies. */ }
@@ -1804,8 +1895,10 @@ for (const tab of document.querySelectorAll('[data-page]')) {
   tab.addEventListener('click', () => navigate({ page: tab.dataset.page }));
 }
 $('#app-back').onclick = goBack;
-$('#open-sync').onclick = () => { paintSync(); $('#sync-dialog').showModal(); sync.session(); };
-$('#close-sync').onclick = () => $('#sync-dialog').close();
+function openSync() { paintSync(); $('#sync-dialog').showModal(); sync.session(); }
+$('#open-sync').onclick = openSync;
+$('#open-settings').onclick = () => navigate({ page: 'settings' });
+$('#close-sync').onclick = () => { $('#sync-dialog').close(); if (state.page === 'settings') render(); };
 $('#sync-form').onsubmit = async event => {
   event.preventDefault();
   const input = $('#sync-password');
@@ -1833,8 +1926,9 @@ $('#feed-form').onsubmit = event => {
   $('#feed-dialog').close(); openFeed(input.value); input.value = '';
 };
 $('#toggle').onclick = () => { if (state.current) start(state.current); };
-$('#rewind').onclick = () => seek(position - 15);
-$('#forward').onclick = () => seek(position + 30);
+$('#rewind').onclick = () => seek(position - state.settings.skipBack);
+$('#forward').onclick = () => seek(position + state.settings.skipForward);
+paintSkips();
 $('#seek').onchange = event => seek(Number(event.target.value));
 $('#seek').oninput = event => paintRange(event.target);
 function applyVolume(persist = false) {
@@ -1950,10 +2044,11 @@ player();
 if (native) {
   initializeNativeQueue().catch(() => {});
   shareShowSettings();
+  shareSettings();
   shareFollows();
   android('notifications').then(enabled => {
     notifications = enabled;
-    if (state.page === 'library') render();
+    if (state.page === 'settings') render();
   }).catch(() => {});
 }
 refreshFollowedFeeds();

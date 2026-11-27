@@ -140,6 +140,17 @@ button.card-category:hover{text-decoration:underline;text-underline-offset:3px}
 .episode-tools input:not([type=range]){flex:1;width:0;min-height:44px;border-radius:999px}
 .episode-tools .outline{min-height:44px}
 .library-actions{display:flex;flex-wrap:wrap;gap:8px}
+.icon-button{width:44px;padding:0!important}
+.settings{display:grid;gap:30px;max-width:720px;margin-top:18px}
+.settings-group{display:grid;gap:4px}
+.settings-group h2{margin-bottom:6px}
+.settings-group>.meta{color:var(--muted);font-size:14px;line-height:1.45;margin-bottom:10px}
+.settings-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--hairline)}
+.settings-text{display:grid;gap:3px;min-width:0}
+.settings-text label,.settings-text span{font-weight:650}
+.settings-text small{color:var(--muted);font-size:13px;line-height:1.4}
+.settings-row select{flex:0 0 auto;min-height:44px;min-width:96px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);padding:0 12px;font-weight:700}
+.settings-row .outline{flex:0 0 auto;min-width:72px}
 .outline[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
 .episode[data-active]{border-color:#7fbf63;background:#172c1d}
 .episode-info{display:flex;align-items:center;gap:13px;flex:1 1 220px;min-width:0}
@@ -234,6 +245,7 @@ dialog form{display:grid;gap:12px}
  .topbar-brand{display:block}
  .topbar .back:not([hidden])~.topbar-brand{display:none}
  .topbar .outline{min-height:40px;padding:0 13px}
+ .topbar .icon-button{width:40px}
  .content{padding:14px 14px 0}
  .hero{padding:20px 18px;border-radius:18px}
  .hero:before{right:-173px}.hero:after{display:none}

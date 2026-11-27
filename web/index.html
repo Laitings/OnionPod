@@ -41,6 +41,7 @@
     <symbol id="i-queued" viewBox="0 0 24 24"><path d="M4 6h16M4 11h10M4 16h7m3 1 2.5 2.5 5-5"/></symbol>
     <symbol id="i-notes" viewBox="0 0 24 24"><path d="M6 3.5h9l3 3v14H6zM9 10h6M9 13.5h6M9 17h4"/></symbol>
     <symbol id="i-back" viewBox="0 0 24 24"><path d="m14.5 5.5-6.5 6.5 6.5 6.5"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
     <symbol id="i-sync" viewBox="0 0 24 24"><path d="M5 10a7 7 0 0 1 12-3l2 2m0-5v5h-5M19 14a7 7 0 0 1-12 3l-2-2m0 5v-5h5"/></symbol>
   </svg>
   <aside class="sidebar">
@@ -56,7 +57,7 @@
     <div class="sidebar-bottom"><span></span> OnionPod <small>v0.1</small></div>
   </aside>
   <main id="main">
-    <header class="topbar"><div class="topbar-start"><button id="app-back" class="back" hidden><svg class="icon" aria-hidden="true"><use href="#i-back"></use></svg>Back</button><img class="topbar-brand" src="icons/onionpod-192.png" alt=""><span id="section-label">Discover</span></div><div class="topbar-actions"><button id="open-sync" class="outline"><svg class="icon" aria-hidden="true"><use href="#i-sync"></use></svg>Sync</button><button id="add-feed" class="outline" aria-label="Add RSS feed"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg><span><span class="wide-label">Add </span>RSS<span class="wide-label"> feed</span></span></button></div></header>
+    <header class="topbar"><div class="topbar-start"><button id="app-back" class="back" hidden><svg class="icon" aria-hidden="true"><use href="#i-back"></use></svg>Back</button><img class="topbar-brand" src="icons/onionpod-192.png" alt=""><span id="section-label">Discover</span></div><div class="topbar-actions"><button id="open-sync" class="outline"><svg class="icon" aria-hidden="true"><use href="#i-sync"></use></svg>Sync</button><button id="add-feed" class="outline" aria-label="Add RSS feed"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg><span><span class="wide-label">Add </span>RSS<span class="wide-label"> feed</span></span></button><button id="open-settings" class="outline icon-button" aria-label="Settings" title="Settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg></button></div></header>
     <div id="content" class="content"></div>
     <p id="notice" role="status" hidden></p>
   </main>

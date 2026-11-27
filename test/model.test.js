@@ -227,3 +227,11 @@ test('server exposes shared assets and rejects a local feed before fetching', as
     assert.equal((await fetch(base + '/api/feed?url=https://127.0.0.1')).status, 502);
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
+
+test('Settings keep offered choices and fall back to defaults for anything else', async () => {
+  const { readSettings, defaultSettings } = await import('../web/model.js');
+  assert.deepEqual(readSettings(undefined), defaultSettings);
+  assert.deepEqual(readSettings({ skipBack: 10, skipForward: '45', disconnectRewind: 0, callRewind: 7, extra: 1 }),
+    { skipBack: 10, skipForward: 45, disconnectRewind: 0, callRewind: 5 });
+  assert.deepEqual(readSettings({ skipBack: -15, skipForward: null, disconnectRewind: 'x' }), defaultSettings);
+});

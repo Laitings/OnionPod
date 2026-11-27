@@ -10,6 +10,7 @@ import android.os.SystemClock;
 import androidx.annotation.OptIn;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
+import androidx.media3.common.ForwardingPlayer;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
 import androidx.media3.common.util.UnstableApi;
@@ -29,8 +30,6 @@ import org.json.JSONObject;
 
 public final class PlaybackService extends MediaSessionService {
     static final SessionCommand LOAD_EPISODE = new SessionCommand("app.onionpod.LOAD_EPISODE", Bundle.EMPTY);
-    private static final long DISCONNECT_REWIND_MS = 15_000;
-    private static final long CALL_REWIND_MS = 5_000;
     private MediaSession session;
     private ExoPlayer player;
     private SyncTransport transport;
@@ -59,19 +58,19 @@ public final class PlaybackService extends MediaSessionService {
         }
     };
 
+    @OptIn(markerClass = UnstableApi.class)
     @Override public void onCreate() {
         super.onCreate();
         transport = new SyncTransport(this);
         queue = new PlaybackQueue(this);
-        player = new ExoPlayer.Builder(this).setSeekBackIncrementMs(15000)
-            .setSeekForwardIncrementMs(30000).build();
+        player = new ExoPlayer.Builder(this).build();
         player.setAudioAttributes(new AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), true);
         player.setHandleAudioBecomingNoisy(true);
         player.addListener(new Player.Listener() {
             @Override public void onPlayWhenReadyChanged(boolean ready, int reason) {
                 if (!ready && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY) {
-                    rewind(DISCONNECT_REWIND_MS);
+                    rewind(AppSettings.disconnectRewindMs(PlaybackService.this));
                 }
             }
             @Override public void onPlaybackSuppressionReasonChanged(int reason) {
@@ -79,7 +78,7 @@ public final class PlaybackService extends MediaSessionService {
                 if (reason == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) handler.post(watchForCall);
                 else if (heldForCall && reason == Player.PLAYBACK_SUPPRESSION_REASON_NONE) {
                     heldForCall = false;
-                    rewind(CALL_REWIND_MS);
+                    rewind(AppSettings.callRewindMs(PlaybackService.this));
                 }
             }
             @Override public void onIsPlayingChanged(boolean playing) {
@@ -101,7 +100,18 @@ public final class PlaybackService extends MediaSessionService {
         PendingIntent open = PendingIntent.getActivity(this, 0,
             new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        session = new MediaSession.Builder(this, player).setSessionActivity(open).setCallback(new MediaSession.Callback() {
+        // Headset, notification, and car controls skip by the lengths chosen in Settings.
+        Player controls = new ForwardingPlayer(player) {
+            @Override public long getSeekBackIncrement() { return AppSettings.skipBackMs(PlaybackService.this); }
+            @Override public long getSeekForwardIncrement() { return AppSettings.skipForwardMs(PlaybackService.this); }
+            @Override public void seekBack() { seekTo(Math.max(0, getCurrentPosition() - getSeekBackIncrement())); }
+            @Override public void seekForward() {
+                long target = getCurrentPosition() + getSeekForwardIncrement();
+                long length = getDuration();
+                seekTo(length == C.TIME_UNSET ? target : Math.min(target, length));
+            }
+        };
+        session = new MediaSession.Builder(this, controls).setSessionActivity(open).setCallback(new MediaSession.Callback() {
             @OptIn(markerClass = UnstableApi.class)
             @Override public MediaSession.ConnectionResult onConnect(MediaSession session, MediaSession.ControllerInfo controller) {
                 if (!controller.getPackageName().equals(getPackageName())) {
@@ -131,6 +141,7 @@ public final class PlaybackService extends MediaSessionService {
     }
 
     private void rewind(long amount) {
+        if (amount <= 0) return;
         MediaItem item = player.getCurrentMediaItem();
         if (item == null || !player.isCurrentMediaItemSeekable() || player.getPlaybackState() == Player.STATE_ENDED) return;
         long resumePosition = Math.max(0, player.getCurrentPosition() - amount);

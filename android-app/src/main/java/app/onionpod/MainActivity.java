@@ -220,6 +220,10 @@ public final class MainActivity extends ComponentActivity {
             ShowSettings.save(this, data);
             return true;
         }
+        if (action.equals("settings")) {
+            AppSettings.save(this, data);
+            return true;
+        }
         if (action.equals("follows")) {
             NewEpisodes.setFollows(this, data.getJSONArray("items"));
             return true;

@@ -482,3 +482,21 @@ export function time(seconds) {
   const tail = String(value % 60).padStart(2, '0');
   return mins < 60 ? mins + ':' + tail : Math.floor(mins / 60) + ':' + String(mins % 60).padStart(2, '0') + ':' + tail;
 }
+
+// App-wide settings. Each value is limited to the choices the Settings page offers.
+export const settingChoices = {
+  skipBack: [5, 10, 15, 20, 30, 45, 60],
+  skipForward: [10, 15, 20, 30, 45, 60, 90],
+  disconnectRewind: [0, 5, 10, 15, 20, 30, 45, 60],
+  callRewind: [0, 3, 5, 10, 15, 20, 30]
+};
+export const defaultSettings = { skipBack: 15, skipForward: 30, disconnectRewind: 15, callRewind: 5 };
+
+export function readSettings(value) {
+  const settings = { ...defaultSettings };
+  for (const [name, choices] of Object.entries(settingChoices)) {
+    const chosen = Number(value?.[name]);
+    if (choices.includes(chosen)) settings[name] = chosen;
+  }
+  return settings;
+}
