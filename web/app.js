@@ -1116,12 +1116,7 @@ function insertList(target, episodes, context) {
     mark.disabled = playing && activeKey === episode.key;
     actions.append(mark);
 
-    if (context === 'inbox') {
-      row.dataset.inbox = episode.key;
-      const dismiss = episodeButton('close', 'Dismiss', episode, () => dismissFromInbox(episode.key));
-      dismiss.classList.add('inbox-dismiss');
-      actions.append(dismiss);
-    } else if (context === 'queue') {
+    if (context === 'queue') {
       const up = episodeButton('up', 'Move up', episode, () => editQueue('move-up', episode, index));
       up.disabled = index === 0;
       actions.append(up, episodeButton('close', 'Remove from queue', episode, () => editQueue('remove', episode)));
@@ -1131,6 +1126,12 @@ function insertList(target, episodes, context) {
         () => editQueue('add', episode));
       add.disabled = queued;
       actions.append(add);
+    }
+    if (context === 'inbox') {
+      row.dataset.inbox = episode.key;
+      const dismiss = episodeButton('close', 'Dismiss', episode, () => dismissFromInbox(episode.key));
+      dismiss.classList.add('inbox-dismiss');
+      actions.append(dismiss);
     }
     if (native && context !== 'inbox') {
       const downloaded = state.downloads.find(item => item.key === episode.key);
