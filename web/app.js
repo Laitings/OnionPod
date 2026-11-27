@@ -78,7 +78,7 @@ const sync = createSync({
   saved: saved.syncState,
   call: syncRequest,
   persist: save,
-  local: () => ({ follows: state.follows, progress: state.progress, episodeDetails: state.episodeDetails, queue: queueItems(state.queue) }),
+  local: () => ({ follows: state.follows, progress: state.progress, episodeDetails: state.episodeDetails, queue: queueItems(state.queue), inbox: state.inbox }),
   collect: native ? async ingest => {
     // The playback service can change the queue while the app is closed.
     await initializeNativeQueue();
@@ -127,9 +127,15 @@ function android(action, data = {}) {
   });
 }
 
-function paintInboxCount() {
+// Released episodes of followed shows. Synced entries can arrive before their follow does.
+function visibleInbox() {
   const now = Date.now();
-  const count = state.inbox.filter(episode => !(Date.parse(episode.date) > now)).length;
+  const followed = new Set(state.follows.map(show => show.url));
+  return state.inbox.filter(episode => followed.has(episode.feed) && !(Date.parse(episode.date) > now));
+}
+
+function paintInboxCount() {
+  const count = visibleInbox().length;
   $('#inbox-count').textContent = count > 99 ? '99+' : count || '';
 }
 
@@ -198,8 +204,18 @@ function applyQueue(items, at) {
 function applySync(changes) {
   let libraryChanged = false;
   let progressChanged = false;
+  let inboxChanged = false;
   for (const { type, key, value, at, episode } of changes) {
-    if (type === 'queue') {
+    if (type === 'inbox') {
+      const present = state.inbox.some(item => item.key === key);
+      if (value === null && present) {
+        state.inbox = state.inbox.filter(item => item.key !== key);
+        inboxChanged = true;
+      } else if (value && !present) {
+        state.inbox.push({ ...value, discoveredAt: value.discoveredAt ?? Date.now() });
+        inboxChanged = true;
+      }
+    } else if (type === 'queue') {
       if (at > sync.data.queueAt) applyQueue(value, at);
     } else if (type === 'follow') {
       const existing = state.follows.some(show => show.url === key);
@@ -226,6 +242,8 @@ function applySync(changes) {
     }
   }
   if (libraryChanged || (progressChanged && !playing && ['show', 'queue', 'downloads', 'favorites'].includes(state.page))) render();
+  else if (inboxChanged && state.page === 'inbox') render();
+  if (inboxChanged) paintInboxCount();
   if (state.page === 'discover') paintContinueListening();
   if (libraryChanged) refreshFollowedFeeds();
 }
@@ -878,7 +896,7 @@ async function dissolve(card) {
     spark.style.top = y + 'px';
     document.body.append(spark);
     const angle = index / 18 * Math.PI * 2;
-    const reach = box.width * (0.45 + Math.random() * 0.35);
+    const reach = Math.min(box.width, 280) * (0.45 + Math.random() * 0.35);
     spark.animate([
       { transform: 'translate(-50%,-50%) scale(1)', opacity: 1 },
       { transform: `translate(calc(-50% + ${Math.cos(angle) * reach}px), calc(-50% + ${Math.sin(angle) * reach}px)) scale(0)`, opacity: 0 }
@@ -893,8 +911,8 @@ async function dissolve(card) {
 }
 
 // Remaining cards glide from their old places into the gap.
-function glide(before) {
-  for (const card of document.querySelectorAll('#continue-listening article')) {
+function glide(before, selector = '#continue-listening article') {
+  for (const card of document.querySelectorAll(selector)) {
     const old = before.get(card);
     if (!old) continue;
     const now = card.getBoundingClientRect();
@@ -902,6 +920,62 @@ function glide(before) {
     card.animate([{ transform: `translate(${old.left - now.left}px, ${old.top - now.top}px)` }, { transform: 'none' }],
       { duration: 380, easing: 'cubic-bezier(.2,.8,.2,1)' });
   }
+}
+
+const inboxRows = () => [...document.querySelectorAll('.episode[data-inbox]')];
+
+async function dismissFromInbox(key) {
+  const row = inboxRows().find(item => item.dataset.inbox === key);
+  if (!row || row.dataset.leaving !== undefined) return;
+  row.dataset.leaving = '';
+  if (!reducedMotion.matches) await dissolve(row).catch(() => {});
+  const rows = inboxRows();
+  const index = rows.findIndex(item => item.dataset.inbox === key);
+  const places = new Map(rows.map(item => [item.dataset.inbox, item.getBoundingClientRect()]));
+  removeInboxEpisodes([key]);
+  if (state.page !== 'inbox') return;
+  const remaining = inboxRows();
+  if (!reducedMotion.matches) {
+    glide(new Map(remaining.map(item => [item, places.get(item.dataset.inbox)])), '.episode[data-inbox]');
+  }
+  const controls = document.querySelectorAll('.inbox-dismiss');
+  (controls[Math.min(Math.max(index, 0), controls.length - 1)] ?? $('[data-page=inbox]')).focus();
+}
+
+async function clearInbox(control) {
+  const keys = visibleInbox().map(episode => episode.key);
+  control.disabled = true;
+  if (!reducedMotion.matches) {
+    // Rows on screen leave one after another; the rest go with them.
+    const onScreen = inboxRows().filter(row => {
+      const box = row.getBoundingClientRect();
+      return box.top < innerHeight && box.bottom > 0;
+    }).slice(0, 8);
+    await Promise.all(onScreen.map((row, index) => new Promise(done => setTimeout(done, index * 90))
+      .then(() => dissolve(row)).catch(() => {})));
+  }
+  removeInboxEpisodes(keys);
+  $('[data-page=inbox]').focus();
+  notice('Inbox cleared.');
+}
+
+// The first press arms the button, so one stray tap cannot empty the inbox.
+function clearInboxButton() {
+  let timer;
+  const control = button('Delete all', () => {
+    if (control.dataset.armed === undefined) {
+      control.dataset.armed = '';
+      control.textContent = 'Tap again to delete all';
+      timer = setTimeout(() => {
+        delete control.dataset.armed;
+        control.textContent = 'Delete all';
+      }, 4000);
+      return;
+    }
+    clearTimeout(timer);
+    clearInbox(control);
+  });
+  return control;
 }
 
 async function removeFromContinue(key) {
@@ -1043,11 +1117,8 @@ function insertList(target, episodes, context) {
     actions.append(mark);
 
     if (context === 'inbox') {
-      const dismiss = episodeButton('close', 'Dismiss', episode, () => {
-        removeInboxEpisodes([episode.key]);
-        const controls = document.querySelectorAll('.inbox-dismiss');
-        (controls[Math.min(index, controls.length - 1)] ?? $('[data-page=inbox]')).focus();
-      });
+      row.dataset.inbox = episode.key;
+      const dismiss = episodeButton('close', 'Dismiss', episode, () => dismissFromInbox(episode.key));
       dismiss.classList.add('inbox-dismiss');
       actions.append(dismiss);
     } else if (context === 'queue') {
@@ -1307,12 +1378,15 @@ function render() {
   } else if (page === 'settings') {
     content.append(el('h1', '', 'Settings'), settingsPage());
   } else {
-    content.append(el('h1', '', { favorites: 'Favorites', inbox: 'New Episodes', queue: 'Up next', downloads: 'Downloads' }[page]));
+    const title = el('h1', '', { favorites: 'Favorites', inbox: 'New Episodes', queue: 'Up next', downloads: 'Downloads' }[page]);
+    const waiting = page === 'inbox' ? inboxNewestFirst(visibleInbox()) : [];
+    if (waiting.length) {
+      const heading = el('div', 'library-heading');
+      heading.append(title, clearInboxButton());
+      content.append(heading);
+    } else content.append(title);
     if (page === 'favorites') insertList(content, state.favorites, 'favorites');
-    else if (page === 'inbox') {
-      const now = Date.now();
-      insertList(content, inboxNewestFirst(state.inbox.filter(episode => !(Date.parse(episode.date) > now))), 'inbox');
-    }
+    else if (page === 'inbox') insertList(content, waiting, 'inbox');
     else insertList(content, page === 'queue' ? state.queue : state.downloads, page);
   }
   updateEpisodeBadges();
@@ -1500,7 +1574,9 @@ function observeFollowedEpisodes(url, episodes, opened = false) {
   const discoveredAt = Date.now();
   for (const episode of added) {
     if (state.progress[episode.key] > 0 || (playing && activeKey === episode.key)) continue;
+    if (state.inbox.some(item => item.key === episode.key)) continue;
     state.inbox.push({ ...episode, discoveredAt });
+    sync.shareInbox({ ...episode, discoveredAt });
   }
   return activity !== previous;
 }
@@ -1508,6 +1584,9 @@ function observeFollowedEpisodes(url, episodes, opened = false) {
 function removeInboxEpisodes(keys) {
   const remaining = state.inbox.filter(episode => !keys.includes(episode.key));
   if (remaining.length === state.inbox.length) return;
+  for (const episode of state.inbox) {
+    if (keys.includes(episode.key)) sync.record('inbox', episode.key, null, true);
+  }
   state.inbox = remaining;
   save();
   if (state.page === 'inbox') render();

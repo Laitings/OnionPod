@@ -445,6 +445,17 @@ export function resumeEpisode(value, key = value?.key) {
   };
 }
 
+// An inbox entry as it travels between devices.
+export function inboxEpisode(value, key = value?.key) {
+  const episode = resumeEpisode(value, key);
+  if (!episode) return null;
+  return {
+    ...episode,
+    ...(typeof value.id === 'string' && value.id ? { id: value.id.slice(0, 4096) } : {}),
+    ...(Number.isSafeInteger(value.discoveredAt) && value.discoveredAt > 0 ? { discoveredAt: value.discoveredAt } : {})
+  };
+}
+
 // Position zero means listened. The last 30 seconds count, except on clips of a minute or less.
 export function savedPosition(position, duration) {
   return duration > 60 && duration - position <= 30 ? 0 : position;

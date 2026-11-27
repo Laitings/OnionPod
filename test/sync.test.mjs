@@ -120,6 +120,20 @@ test('removing from Continue Listening is accepted and shared', () => {
   } finally { store.close(); }
 });
 
+test('the inbox is shared and a removal beats a late discovery', () => {
+  const store = new SyncStore(':memory:');
+  try {
+    const item = { key: episode, feed, audio: 'https://example.com/episode.mp3', title: 'First', show: 'Show', artwork: '', date: '' };
+    const found = { type: 'inbox', key: episode, value: item, at: 0 };
+    const send = change => store.exchange(0, validateExchange({ cursor: 0, changes: [change] }).changes).accepted[0];
+    assert.deepEqual(send(found), found);
+    const removed = { type: 'inbox', key: episode, value: null, at: Date.now() };
+    assert.deepEqual(send(removed), removed);
+    assert.deepEqual(send(found), removed);
+    assert.throws(() => send({ ...found, value: { ...item, audio: 'nope' } }));
+  } finally { store.close(); }
+});
+
 test('existing device libraries merge without overriding newer actions', async () => {
   const store = new SyncStore(':memory:');
   try {

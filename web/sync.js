@@ -1,10 +1,14 @@
-import { episodeFeed, httpsUrl, queueItems, resumeEpisode } from './model.js';
+import { episodeFeed, httpsUrl, inboxEpisode, queueItems, resumeEpisode } from './model.js';
 
 const recordId = ({ type, key }) => JSON.stringify([type, key]);
 
 function recordValue(type, key, value) {
   if (typeof key !== 'string' || !key || key.length > 4096) return undefined;
   if (type === 'queue') return key === 'queue' && Array.isArray(value) ? queueItems(value) : undefined;
+  if (type === 'inbox') {
+    if (value === null) return episodeFeed(key) ? null : undefined;
+    return inboxEpisode(value, key) ?? undefined;
+  }
   if (type === 'dismiss') return episodeFeed(key) && value === true ? true : undefined;
   if (type === 'progress') {
     return episodeFeed(key) && Number.isFinite(value) && value >= 0 && value <= 604800 ? value : undefined;
@@ -21,7 +25,7 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
     cursor: saved?.cursor ?? 0, initialized: Boolean(saved?.initialized),
     signedIn: Boolean(saved?.signedIn), pending: saved?.pending ?? {}, progressAt: saved?.progressAt ?? {},
     dismissedAt: saved?.dismissedAt ?? {},
-    queueAt: saved?.queueAt ?? 0
+    queueAt: saved?.queueAt ?? 0, inboxShared: Boolean(saved?.inboxShared)
   };
   let enabled = null;
   let relayRequiresLogin = null;
@@ -51,6 +55,12 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
     lastTimestamp = Math.max(Date.now(), lastTimestamp + 1, last + 1);
     store(type, key, value, lastTimestamp, episode);
     schedule(urgent ? 300 : 3000);
+  }
+
+  // A found release is shared at time zero, so a removal made on any device always wins.
+  function shareInbox(episode) {
+    store('inbox', episode.key, episode, 0);
+    schedule(3000);
   }
 
   // Records the queue with the time it changed, which on Android may be while the app was closed.
@@ -135,6 +145,11 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
         data.initialized = true;
         persist();
       }
+      if (!data.inboxShared) {
+        for (const episode of local().inbox ?? []) store('inbox', episode.key, episode, 0);
+        data.inboxShared = true;
+        persist();
+      }
       let receivedQueue = false;
       for (let page = 0; page < 15; page++) {
         const sent = Object.values(data.pending).slice(0, 50);
@@ -177,5 +192,5 @@ export function createSync({ saved, call, persist, local, collect, apply, paint 
     paint();
   }
 
-  return { data, session, login, logout, record, recordQueue, run: exchange, schedule, status: () => ({ enabled, relayRequiresLogin, message }) };
+  return { data, session, login, logout, record, recordQueue, shareInbox, run: exchange, schedule, status: () => ({ enabled, relayRequiresLogin, message }) };
 }
