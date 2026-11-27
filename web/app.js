@@ -1165,7 +1165,7 @@ function insertList(target, episodes, context) {
   target.append(list);
 }
 
-function episodeBrowser(show) {
+function episodeBrowser(show, header) {
   const panel = el('div');
   const tools = el('div', 'episode-tools');
   const search = el('input');
@@ -1208,7 +1208,7 @@ function episodeBrowser(show) {
     }, 200);
   });
   paint();
-  panel.append(tools, list);
+  panel.append(tools, header, list);
   return panel;
 }
 
@@ -1367,8 +1367,7 @@ function render() {
     });
     filter.id = 'listened-filter';
     header.append(filter);
-    content.append(header);
-    content.append(episodeBrowser(show));
+    content.append(episodeBrowser(show, header));
   } else if (page === 'library') {
     const heading = el('div', 'library-heading');
     const actions = el('div', 'library-actions');
